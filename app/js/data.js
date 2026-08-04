@@ -48,7 +48,28 @@
 
       /* Statuses that count as still-live work. Compared after
          normalisation, so "In-Progress" and "IN PROGRESS" both match. */
-      openStatuses: ["Open", "In Progress", "Assigned"]
+      openStatuses: ["Open", "In Progress", "Assigned"],
+
+      /* The full workflow vocabulary, in lifecycle order. Statuses are
+         listed even when their count is zero — for a fixed vocabulary,
+         "Overdue 0" is information, not an empty row.
+
+         Colour is assigned per GROUP, not per status: ten separate hues
+         would exceed the point where adjacent classes blur, and no
+         eight-slot palette can keep ten categories apart under colour-vision
+         deficiency. Identity is carried by the axis label and the value
+         label on every bar; the group colour only adds lifecycle structure,
+         so nothing is lost if two groups look similar to a given reader.
+
+         Slot order here was validated on the adjacent pairlist in both
+         light and dark modes. Changing the group order means re-running
+         scripts/validate_palette.js. */
+      statusGroups: [
+        { name: "Live work", slot: 1, statuses: ["Open", "In Progress", "Assigned", "Reopened"] },
+        { name: "Time-sensitive", slot: 4, statuses: ["Due", "Overdue"] },
+        { name: "Closed out", slot: 3, statuses: ["Approved", "Closed"] },
+        { name: "Sent back", slot: 2, statuses: ["Returned", "Rejected"] }
+      ]
     }
   };
 
@@ -93,7 +114,7 @@
     /* Creator's "report not found" family — almost always a stage/scope
        problem rather than a genuinely absent report. */
     if (/report.*(not\s*found|invalid|does\s*not\s*exist)/i.test(text) ||
-        code === 2945 || code === 4890) {
+      code === 2945 || code === 4890) {
       return "Creator could not resolve \"" + reportName + "\" in app \"" +
         cfg.appName + "\"" +
         (Orbit.isDevEnv ? " (development stage)" : "") + ". " +
@@ -143,7 +164,7 @@
         /* The SDK rejects rather than resolving on "no records" in some
            versions — recognise it and return what we have. */
         if (err && (err.code === 3100 ||
-            /no\s*record/i.test(err.message || err.responseText || ""))) {
+          /no\s*record/i.test(err.message || err.responseText || ""))) {
           return out;
         }
         console.error("[Orbit] getRecords rejected for " + reportName + ":", err);
@@ -339,6 +360,89 @@
   Orbit.summariseByStatus = summariseByStatus;
   Orbit.normStatus = normStatus;
 
+  /**
+   * Build the ordered, grouped status breakdown the chart renders.
+   *
+   * Every configured status appears, including zeros. Any status found in
+   * the data but absent from the configuration is appended in an "Other"
+   * group rather than dropped — an unlisted workflow state must be visible,
+   * not silently missing from the total.
+   *
+   * @returns {{rows: Array, groups: Array, total: number, unlisted: Array}}
+   */
+  function statusChartData(statusSummary, spec) {
+    var groups = (spec || reports.omRequests).statusGroups || [];
+    var breakdown = statusSummary.breakdown || {};
+
+    /* Fold the raw labels onto their normalised key so "In-Progress" and
+       "In Progress" become one row rather than two. */
+    var counts = {};
+    var seenRaw = {};
+    Object.keys(breakdown).forEach(function (raw) {
+      var key = normStatus(raw);
+      counts[key] = (counts[key] || 0) + breakdown[raw];
+      if (!seenRaw[key]) seenRaw[key] = raw;
+    });
+
+    var rows = [];
+    var claimed = {};
+
+    groups.forEach(function (group, gi) {
+      group.statuses.forEach(function (label) {
+        var key = normStatus(label);
+        claimed[key] = true;
+        rows.push({
+          label: label,
+          value: counts[key] || 0,
+          group: group.name,
+          groupIndex: gi,
+          slot: group.slot
+        });
+      });
+    });
+
+    /* Anything the configuration does not know about. */
+    var unlisted = [];
+    Object.keys(counts).forEach(function (key) {
+      if (claimed[key]) return;
+      unlisted.push(seenRaw[key]);
+      rows.push({
+        label: seenRaw[key],
+        value: counts[key],
+        group: "Other",
+        groupIndex: groups.length,
+        slot: 6
+      });
+    });
+
+    var total = rows.reduce(function (sum, r) { return sum + r.value; }, 0);
+
+    /* Groups actually represented, for the legend. */
+    var legend = groups.map(function (g, gi) {
+      return {
+        name: g.name,
+        slot: g.slot,
+        value: rows.reduce(function (sum, r) {
+          return sum + (r.groupIndex === gi ? r.value : 0);
+        }, 0)
+      };
+    });
+
+    if (unlisted.length) {
+      legend.push({
+        name: "Other",
+        slot: 6,
+        value: rows.reduce(function (sum, r) {
+          return sum + (r.group === "Other" ? r.value : 0);
+        }, 0)
+      });
+    }
+
+    return { rows: rows, groups: legend, total: total, unlisted: unlisted };
+  }
+
+  Orbit.statusChartData = statusChartData;
+
   /* ======================================================================
      Mock data
      Shaped like a real OM_Request_Form_Report row so the render path is
@@ -378,10 +482,10 @@
          Deliberately mixes "In-Progress" and "In Progress" so the
          normalisation path is exercised in preview. */
       var pool = back <= 1
-        ? ["Open", "In Progress", "In-Progress", "Assigned", "Open", "Closed"]
+        ? ["Open", "In Progress", "In-Progress", "Assigned", "Due", "Overdue", "Reopened"]
         : back <= 3
-          ? ["Open", "In Progress", "Assigned", "Closed", "Closed", "Completed"]
-          : ["Closed", "Completed", "Closed", "Rejected", "Completed", "Closed"];
+          ? ["Open", "In Progress", "Assigned", "Approved", "Returned", "Overdue", "Closed"]
+          : ["Closed", "Approved", "Closed", "Rejected", "Approved", "Returned", "Closed"];
 
       for (var i = 0; i < count; i++) {
         var day = 1 + Math.floor((i / count) * 27);
@@ -394,7 +498,7 @@
           ID: String(seq),
           OM_Number: "OM/" + due.getFullYear() + "/" + String(seq).slice(-4),
           Reference_No: "NSDC/REF/" + due.getFullYear() + "/" + String(seq).slice(-4),
-          Title_Subject: "Office Memorandum " + (seq - 4200),
+          Title_Subject: "Orbit " + (seq - 4200),
           Description: "Sample description for OM " + (seq - 4200) + ".",
           Date_of_OM: fmtCreatorDate(raised),
           Due_Date: fmtCreatorDate(due),

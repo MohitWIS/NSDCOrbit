@@ -304,6 +304,200 @@
   }
 
   /* ======================================================================
+     Horizontal bar chart — magnitude across named categories
+
+     The right form when categories are nominal, numerous, or have long
+     labels: labels read horizontally at full length, and the list grows
+     downward without crowding. Colour groups the rows; the axis label and
+     the value on every bar carry identity, so colour is redundant rather
+     than load-bearing.
+     ====================================================================== */
+
+  /**
+   * @param {Array<{label,value,group,slot}>} data
+   * @param {Object} opts { valueLabel, categoryLabel, groups, showZeros }
+   */
+  function hBarChart(data, opts) {
+    opts = opts || {};
+    var valueLabel = opts.valueLabel || "Count";
+    var categoryLabel = opts.categoryLabel || "Category";
+
+    var host = el("div", { class: "chart chart--hbar chart--animate" });
+
+    if (!data || !data.length) {
+      host.appendChild(emptyState("Nothing to show"));
+      return host;
+    }
+
+    /* Geometry: rows are a fixed height so the chart grows with the data
+       instead of squeezing. */
+    var W = 760;
+    var rowH = 30;
+    var gap = 2;                 /* 2px surface gap between adjacent bars */
+    var padL = 132;              /* room for category labels */
+    var padR = 56;               /* room for the value label past the bar end */
+    var padT = 8;
+    var padB = 26;
+    var plotW = W - padL - padR;
+    var H = padT + data.length * rowH + padB;
+
+    var maxValue = Math.max.apply(null, data.map(function (d) { return d.value; }));
+    var xMax = niceMax(maxValue || 1);
+    var xTicks = ticks(xMax, 4);
+
+    var svg = svgEl("svg", {
+      class: "chart__svg",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMin meet",
+      role: "img",
+      "aria-label": (opts.title || valueLabel) +
+        " — horizontal bar chart with " + data.length +
+        " categories. The same values are available in the table view."
+    });
+
+    /* --- Vertical grid: solid hairlines --------------------------------- */
+    xTicks.forEach(function (t) {
+      var x = padL + plotW * (t / xMax);
+      svg.appendChild(svgEl("line", {
+        class: "chart__grid-line",
+        x1: x.toFixed(1), x2: x.toFixed(1),
+        y1: padT, y2: padT + data.length * rowH
+      }));
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick",
+        x: x.toFixed(1), y: padT + data.length * rowH + 16,
+        "text-anchor": "middle",
+        text: Orbit.compact(t)
+      }));
+    });
+
+    /* --- Baseline at zero ------------------------------------------------ */
+    svg.appendChild(svgEl("line", {
+      class: "chart__axis-line",
+      x1: padL, x2: padL, y1: padT, y2: padT + data.length * rowH
+    }));
+
+    var tooltip = makeTooltip(host);
+
+    /* --- Rows ------------------------------------------------------------ */
+    data.forEach(function (d, i) {
+      var slot = d.slot || 1;
+      var barH = rowH - gap * 2 - 6;
+      var y = padT + i * rowH + (rowH - barH) / 2;
+      var barW = xMax > 0 ? plotW * (d.value / xMax) : 0;
+
+      /* Category label, left of the axis */
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick",
+        x: padL - 10, y: y + barH / 2 + 4,
+        "text-anchor": "end",
+        text: d.label
+      }));
+
+      /* Zero rows get a stub so the row still reads as present */
+      if (d.value === 0) {
+        svg.appendChild(svgEl("rect", {
+          class: "chart__grid-line",
+          x: padL, y: y + barH / 2 - 1,
+          width: 3, height: 2,
+          fill: "var(--axis-line)", stroke: "none"
+        }));
+      } else {
+        svg.appendChild(svgEl("path", {
+          class: "chart__bar s" + slot + "-fill",
+          d: hBarPath(padL, y, barW, barH),
+          style: "animation-delay:" + (i * 30) + "ms"
+        }));
+      }
+
+      /* Value label past the bar end — every bar, because with ten rows the
+         axis alone is hard to read across and the light-mode amber needs
+         the label as relief. */
+      svg.appendChild(svgEl("text", {
+        class: "chart__label",
+        x: padL + barW + 8,
+        y: y + barH / 2 + 4,
+        "text-anchor": "start",
+        text: Orbit.num(d.value)
+      }));
+
+      /* Hit area spans the whole row, far bigger than the bar itself */
+      var hit = svgEl("rect", {
+        class: "chart__bar-hit",
+        x: 0, y: padT + i * rowH,
+        width: W, height: rowH,
+        tabindex: "0",
+        role: "button",
+        "aria-label": d.label + ": " + Orbit.num(d.value) + " " + valueLabel +
+          (d.group ? " (" + d.group + ")" : "")
+      });
+
+      function enter() {
+        host.classList.add("has-hover");
+        var bar = svg.querySelectorAll(".chart__bar")[i];
+        if (bar) bar.classList.add("is-hovered");
+        var rect = host.getBoundingClientRect();
+        var scale = rect.width / W;
+        tooltip.show(
+          (padL + Math.max(barW, 40) / 2) * scale,
+          (y) * scale,
+          d.label,
+          [
+            { label: valueLabel, value: Orbit.num(d.value), color: "var(--series-" + slot + ")" },
+            d.group ? { label: "Group", value: d.group } : null
+          ].filter(Boolean)
+        );
+      }
+
+      function leave() {
+        host.classList.remove("has-hover");
+        Orbit.$$(".chart__bar", svg).forEach(function (b) { b.classList.remove("is-hovered"); });
+        tooltip.hide();
+      }
+
+      hit.addEventListener("mouseenter", enter);
+      hit.addEventListener("mouseleave", leave);
+      hit.addEventListener("focus", enter);
+      hit.addEventListener("blur", leave);
+      svg.appendChild(hit);
+    });
+
+    host.appendChild(svg);
+
+    /* --- Legend: names the groups, never the individual statuses --------- */
+    if (opts.groups && opts.groups.length) {
+      var legend = el("div", { class: "legend" });
+      opts.groups.forEach(function (g) {
+        legend.appendChild(el("span", { class: "legend__item" }, [
+          el("span", {
+            class: "legend__swatch",
+            style: "background:var(--series-" + g.slot + ")"
+          }),
+          document.createTextNode(g.name),
+          el("span", { class: "legend__value", text: Orbit.num(g.value) })
+        ]));
+      });
+      host.appendChild(legend);
+    }
+
+    host.appendChild(tableTwin(data, categoryLabel, valueLabel));
+
+    return host;
+  }
+
+  /** Rounded right end, square at the zero baseline. */
+  function hBarPath(x, y, w, h, r) {
+    var radius = Math.min(r === undefined ? 4 : r, h / 2, w);
+    if (w <= 0.5) return "";
+    return "M" + x + "," + y +
+      "L" + (x + w - radius) + "," + y +
+      "Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + radius) +
+      "L" + (x + w) + "," + (y + h - radius) +
+      "Q" + (x + w) + "," + (y + h) + " " + (x + w - radius) + "," + (y + h) +
+      "L" + x + "," + (y + h) + "Z";
+  }
+
+  /* ======================================================================
      Table view — every chart has one
      ====================================================================== */
 
@@ -452,6 +646,7 @@
   Orbit.charts = {
     sparkline: sparkline,
     barChart: barChart,
+    hBarChart: hBarChart,
     tableTwin: tableTwin,
     viewToggle: viewToggle,
     emptyState: emptyState,

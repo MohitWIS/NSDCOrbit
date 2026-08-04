@@ -32,7 +32,7 @@
       label: "Overview",
       icon: "grid",
       title: "Overview",
-      crumb: "Office Memorandum activity at a glance",
+      crumb: "Orbit",
       render: renderOverview
     }
   ];
@@ -51,7 +51,7 @@
     host.appendChild(el("div", { class: "section" }, [
       el("div", { class: "section__head" }, [
         el("div", {}, [
-          el("h2", { class: "section__title", text: "Office Memorandum requests" }),
+          el("h2", { class: "section__title", text: "Orbit" }),
           el("p", {
             class: "section__desc",
             text: "Volume received this month and across " + Orbit.ytdLabel() + " to date."
@@ -241,6 +241,35 @@
       el("div", { class: "card__body" }, [chart])
     ]));
 
+    /* ---- Status breakdown ---------------------------------------------- */
+    var statusData = null;
+    if (st && st.statusField) {
+      statusData = Orbit.statusChartData(st, Orbit.reports.omRequests);
+      var sd = statusData;
+
+      var statusChart = charts.hBarChart(sd.rows, {
+        valueLabel: "OMs",
+        categoryLabel: "Status",
+        title: "OMs by status",
+        groups: sd.groups
+      });
+
+      slots.trend.appendChild(el("div", { class: "card", style: "margin-top:var(--space-8)" }, [
+        el("div", { class: "card__head" }, [
+          el("div", {}, [
+            el("div", { class: "card__title", text: "OMs by status" }),
+            el("div", {
+              class: "card__subtitle",
+              text: Orbit.num(sd.total) + " records across " + sd.rows.length +
+                " workflow states · grouped by lifecycle stage"
+            })
+          ]),
+          charts.viewToggle(statusChart)
+        ]),
+        el("div", { class: "card__body" }, [statusChart])
+      ]));
+    }
+
     /* ---- Data-quality notices ------------------------------------------ */
     if (!s.dateField) {
       slots.trend.appendChild(el("div", {
@@ -254,26 +283,20 @@
       ]));
     }
 
-    /* A status value nobody expected is a silent undercount on the
-       open/in-progress tile — surface it rather than absorbing it. */
+    /* A status outside the configured vocabulary still gets charted, in the
+       "Other" group — but say so, because it means the workflow has moved
+       on and the lifecycle grouping no longer describes it. */
     if (st && st.statusField) {
-      var known = {};
-      Object.keys(st.openBy).forEach(function (k) { known[Orbit.normStatus(k)] = true; });
-
-      var unexpected = Object.keys(st.breakdown).filter(function (label) {
-        var n = Orbit.normStatus(label);
-        return !known[n] && !/closed|complete|reject|cancel|done/.test(n);
-      });
-
-      if (unexpected.length) {
+      if (statusData && statusData.unlisted.length) {
         slots.trend.appendChild(el("div", {
           class: "mock-banner", style: "margin-top:var(--space-4)"
         }, [
           icon("alert", 14),
           document.createTextNode(
-            "Status values not counted as open or closed: " +
-            unexpected.join(", ") + ". Add them to openStatuses in js/data.js " +
-            "if they represent live work."
+            "Status values not in the configured workflow: " +
+            statusData.unlisted.join(", ") +
+            ". They are charted under “Other” — add them to statusGroups in " +
+            "js/data.js to place them in a lifecycle stage."
           )
         ]));
       }

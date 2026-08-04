@@ -140,6 +140,17 @@
   to { transform: scaleY(1); }
 }
 
+/* Horizontal bars grow from the zero baseline on the left, not the bottom. */
+.chart--hbar.chart--animate .chart__bar {
+  transform-origin: left;
+  animation-name: hbar-grow;
+}
+
+@keyframes hbar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
 .chart--animate .chart__line {
   stroke-dasharray: var(--path-len, 1000);
   stroke-dashoffset: var(--path-len, 1000);
