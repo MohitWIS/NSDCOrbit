@@ -42,8 +42,13 @@
         description: "Description",
         dueDate: "Due_Date",
         dateOfOM: "Date_of_OM",
-        memoType: "Memo_Type"
-      }
+        memoType: "Memo_Type",
+        status: "Status"
+      },
+
+      /* Statuses that count as still-live work. Compared after
+         normalisation, so "In-Progress" and "IN PROGRESS" both match. */
+      openStatuses: ["Open", "In Progress", "Assigned"]
     }
   };
 
@@ -266,6 +271,74 @@
 
   Orbit.summariseByPeriod = summariseByPeriod;
 
+  /**
+   * Normalise a status for comparison. Creator values drift over time —
+   * "In Progress", "In-Progress", "in progress", "InProgress" all occur —
+   * so matching on the raw string silently undercounts.
+   */
+  function normStatus(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_\-]+/g, " ");
+  }
+
+  /**
+   * Count records by status, and total the ones that are still live.
+   *
+   * Returns the open count, a per-status tally for the statuses that make up
+   * that total, the full breakdown, and any records whose status is blank —
+   * blanks are reported rather than quietly folded into "not open", because
+   * a missing status is a data problem, not a closed item.
+   */
+  function summariseByStatus(records, statusField, openStatuses) {
+    var open = openStatuses || reports.omRequests.openStatuses;
+
+    /* Match with and without spaces, so "InProgress" lands too. */
+    var wanted = {};
+    open.forEach(function (label) {
+      var key = normStatus(label);
+      wanted[key] = label;
+      wanted[key.replace(/ /g, "")] = label;
+    });
+
+    var result = {
+      open: 0,
+      openBy: {},
+      breakdown: {},
+      blank: 0,
+      statusField: statusField
+    };
+
+    open.forEach(function (label) { result.openBy[label] = 0; });
+
+    if (!statusField) return result;
+
+    records.forEach(function (rec) {
+      var raw = rec[statusField];
+
+      if (raw === null || raw === undefined || String(raw).trim() === "") {
+        result.blank++;
+        return;
+      }
+
+      var label = String(raw).trim();
+      result.breakdown[label] = (result.breakdown[label] || 0) + 1;
+
+      var key = normStatus(raw);
+      var hit = wanted[key] || wanted[key.replace(/ /g, "")];
+      if (hit) {
+        result.open++;
+        result.openBy[hit]++;
+      }
+    });
+
+    return result;
+  }
+
+  Orbit.summariseByStatus = summariseByStatus;
+  Orbit.normStatus = normStatus;
+
   /* ======================================================================
      Mock data
      Shaped like a real OM_Request_Form_Report row so the render path is
@@ -301,6 +374,15 @@
 
       var memoTypes = ["Circular", "Office Order", "Advisory", "Notification", "Clarification"];
 
+      /* Older months are mostly settled; recent months still hold live work.
+         Deliberately mixes "In-Progress" and "In Progress" so the
+         normalisation path is exercised in preview. */
+      var pool = back <= 1
+        ? ["Open", "In Progress", "In-Progress", "Assigned", "Open", "Closed"]
+        : back <= 3
+          ? ["Open", "In Progress", "Assigned", "Closed", "Closed", "Completed"]
+          : ["Closed", "Completed", "Closed", "Rejected", "Completed", "Closed"];
+
       for (var i = 0; i < count; i++) {
         var day = 1 + Math.floor((i / count) * 27);
         /* Due_Date drives the bucketing, so it is the date generated per
@@ -316,7 +398,8 @@
           Description: "Sample description for OM " + (seq - 4200) + ".",
           Date_of_OM: fmtCreatorDate(raised),
           Due_Date: fmtCreatorDate(due),
-          Memo_Type: memoTypes[(i + back) % memoTypes.length]
+          Memo_Type: memoTypes[(i + back) % memoTypes.length],
+          Status: pool[(i + back) % pool.length]
         });
       }
     }

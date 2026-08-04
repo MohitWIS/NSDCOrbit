@@ -18,7 +18,8 @@
   var state = {
     user: null,
     omRecords: null,
-    omSummary: null
+    omSummary: null,
+    omStatus: null
   };
 
   /* ======================================================================
@@ -100,6 +101,8 @@
       var spec = Orbit.reports.omRequests;
       var dateField = Orbit.resolveDateField(records, spec);
       state.omSummary = Orbit.summariseByPeriod(records, dateField);
+      state.omStatus = Orbit.summariseByStatus(
+        records, spec.fields.status, spec.openStatuses);
       paintOM(host);
       if (isRefetch) Orbit.toast("Refreshed — " + Orbit.num(records.length) + " OM records", "good");
     }).catch(function (err) {
@@ -177,7 +180,31 @@
       ])
     ]));
 
-    /* ---- Tile 3: all-time total in the report -------------------------- */
+    /* ---- Tile 3: live workload ----------------------------------------- */
+    var st = state.omStatus;
+    if (st) {
+      var parts = Object.keys(st.openBy).map(function (label) {
+        return label + " " + Orbit.num(st.openBy[label]);
+      });
+
+      slots.kpi.appendChild(el("div", { class: "card kpi kpi--amber" }, [
+        el("div", { class: "kpi__top" }, [
+          el("div", { class: "kpi__label" }, [
+            el("span", { class: "kpi__icon" }, [icon("clock", 15)]),
+            document.createTextNode("Open / In progress")
+          ])
+        ]),
+        el("div", { class: "kpi__value", text: Orbit.num(st.open) }),
+        el("div", { class: "kpi__meta" }, [
+          el("span", { text: parts.join(" · ") }),
+          st.open > 0 && s.total > 0
+            ? el("span", { text: Orbit.pct((st.open / s.total) * 100, 0) + " of all OMs" })
+            : null
+        ])
+      ]));
+    }
+
+    /* ---- Tile 4: all-time total in the report -------------------------- */
     slots.kpi.appendChild(el("div", { class: "card kpi" }, [
       el("div", { class: "kpi__top" }, [
         el("div", { class: "kpi__label" }, [
@@ -225,7 +252,46 @@
           "Open the browser console for the list of fields present, then set dateField in js/data.js."
         )
       ]));
-    } else if (s.undated > 0) {
+    }
+
+    /* A status value nobody expected is a silent undercount on the
+       open/in-progress tile — surface it rather than absorbing it. */
+    if (st && st.statusField) {
+      var known = {};
+      Object.keys(st.openBy).forEach(function (k) { known[Orbit.normStatus(k)] = true; });
+
+      var unexpected = Object.keys(st.breakdown).filter(function (label) {
+        var n = Orbit.normStatus(label);
+        return !known[n] && !/closed|complete|reject|cancel|done/.test(n);
+      });
+
+      if (unexpected.length) {
+        slots.trend.appendChild(el("div", {
+          class: "mock-banner", style: "margin-top:var(--space-4)"
+        }, [
+          icon("alert", 14),
+          document.createTextNode(
+            "Status values not counted as open or closed: " +
+            unexpected.join(", ") + ". Add them to openStatuses in js/data.js " +
+            "if they represent live work."
+          )
+        ]));
+      }
+
+      if (st.blank > 0) {
+        slots.trend.appendChild(el("div", {
+          class: "mock-banner", style: "margin-top:var(--space-4)"
+        }, [
+          icon("alert", 14),
+          document.createTextNode(
+            Orbit.num(st.blank) + " records have no “" + st.statusField +
+            "” value and are excluded from the open count."
+          )
+        ]));
+      }
+    }
+
+    if (s.dateField && s.undated > 0) {
       slots.trend.appendChild(el("div", {
         class: "mock-banner", style: "margin-top:var(--space-4)"
       }, [
