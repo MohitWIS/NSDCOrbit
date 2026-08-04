@@ -1,0 +1,300 @@
+/* ==========================================================================
+   NSDC Orbit — Chart chrome
+   Marks are thin, grid/axes are recessive solid hairlines (never dashed),
+   fills are separated by a 2px surface gap rather than a stroke.
+   ========================================================================== */
+
+.chart {
+  position: relative;
+  width: 100%;
+}
+
+.chart__svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+/* Refetch holds the previous render at reduced opacity — no skeleton flash,
+   no layout jump. */
+.chart.is-refetching { opacity: 0.55; transition: opacity var(--duration-fast) var(--ease-out); }
+
+/* ---- Grid & axes -------------------------------------------------------- */
+
+.chart__grid-line {
+  stroke: var(--grid-line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart__axis-line {
+  stroke: var(--axis-line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart__tick {
+  fill: var(--ink-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart__axis-title {
+  fill: var(--ink-muted);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---- Marks -------------------------------------------------------------- */
+
+/* Bars: 4px rounded data-end, square at the baseline. */
+.chart__bar {
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.chart__bar-hit { fill: transparent; cursor: pointer; }
+
+.chart.has-hover .chart__bar { opacity: 0.42; }
+.chart.has-hover .chart__bar.is-hovered { opacity: 1; }
+
+/* Lines: 2px, round joins. */
+.chart__line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart__area { stroke: none; }
+
+/* Markers: ≥8px, with a 2px surface ring where they overlap. */
+.chart__dot {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+
+.chart__dot--focus { r: 5; }
+
+/* Crosshair follows the pointer on line/area charts. */
+.chart__crosshair {
+  stroke: var(--axis-line);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* Donut segments are separated by a surface-coloured gap, not a border. */
+.chart__arc {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.chart.has-hover .chart__arc { opacity: 0.45; }
+.chart.has-hover .chart__arc.is-hovered { opacity: 1; }
+
+/* Direct labels are selective — never one per point. */
+.chart__label {
+  fill: var(--ink-secondary);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-sans);
+  pointer-events: none;
+}
+
+.chart__label--inside { fill: #fff; }
+
+/* Hero figure inside a donut */
+.chart__center-value {
+  fill: var(--ink-primary);
+  font-size: 26px;
+  font-weight: var(--weight-bold);
+  font-family: var(--font-sans);
+  text-anchor: middle;
+  letter-spacing: -0.02em;
+}
+
+.chart__center-label {
+  fill: var(--ink-muted);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-sans);
+  text-anchor: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ---- Entrance animation ------------------------------------------------- */
+
+.chart--animate .chart__bar {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: bar-grow var(--duration-chart) var(--ease-out) backwards;
+}
+
+@keyframes bar-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+.chart--animate .chart__line {
+  stroke-dasharray: var(--path-len, 1000);
+  stroke-dashoffset: var(--path-len, 1000);
+  animation: line-draw var(--duration-chart) var(--ease-out) forwards;
+}
+
+@keyframes line-draw { to { stroke-dashoffset: 0; } }
+
+.chart--animate .chart__area { animation: fade-in var(--duration-chart) var(--ease-out) backwards; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .chart--animate .chart__bar,
+  .chart--animate .chart__line,
+  .chart--animate .chart__area { animation: none; stroke-dashoffset: 0; transform: none; }
+}
+
+/* ---- Series colours ----------------------------------------------------- */
+/* Assigned by fixed slot index, never by rank — a filter must not repaint
+   the survivors. */
+
+.s1-fill { fill: var(--series-1); } .s1-stroke { stroke: var(--series-1); }
+.s2-fill { fill: var(--series-2); } .s2-stroke { stroke: var(--series-2); }
+.s3-fill { fill: var(--series-3); } .s3-stroke { stroke: var(--series-3); }
+.s4-fill { fill: var(--series-4); } .s4-stroke { stroke: var(--series-4); }
+.s5-fill { fill: var(--series-5); } .s5-stroke { stroke: var(--series-5); }
+.s6-fill { fill: var(--series-6); } .s6-stroke { stroke: var(--series-6); }
+
+/* ---- Legend ------------------------------------------------------------- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding-block-start: var(--space-3);
+}
+
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--ink-secondary); /* text never wears the series colour */
+  cursor: pointer;
+  user-select: none;
+}
+
+.legend__item.is-muted { opacity: 0.45; }
+
+.legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend__value {
+  font-weight: var(--weight-semibold);
+  color: var(--ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Tooltip ------------------------------------------------------------ */
+
+.chart-tip {
+  position: absolute;
+  z-index: var(--z-tooltip);
+  min-width: 130px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-inverse);
+  color: var(--ink-inverse);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-xs);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -100%) translateY(-10px);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.chart-tip.is-visible { opacity: 1; }
+
+.chart-tip__title {
+  font-weight: var(--weight-semibold);
+  margin-block-end: var(--space-1);
+  padding-block-end: var(--space-1);
+  border-block-end: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+:root[data-theme="dark"] .chart-tip__title { border-color: rgba(0, 0, 0, 0.18); }
+
+.chart-tip__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: space-between;
+  padding-block: 1px;
+}
+
+.chart-tip__key { display: inline-flex; align-items: center; gap: var(--space-2); opacity: 0.85; }
+
+.chart-tip__val { font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+/* ---- Table view — every chart has one ----------------------------------- */
+
+.chart-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+}
+
+.chart-toggle__btn {
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-secondary);
+}
+
+.chart-toggle__btn.is-active {
+  background: var(--surface-1);
+  color: var(--ink-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.chart-tableview { display: none; }
+.chart-tableview.is-visible { display: block; }
+
+/* ---- Sparkline ---------------------------------------------------------- */
+
+.spark { display: block; width: 100%; height: 100%; overflow: visible; }
+.spark__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.spark__area { stroke: none; opacity: 0.16; }
+.spark__end { stroke: var(--surface-1); stroke-width: 2; }
+
+/* ---- Progress / meter --------------------------------------------------- */
+
+.meter {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width var(--duration-chart) var(--ease-out);
+}
+
+/* ---- Texture (accessibility channel; opt-in only) ----------------------- */
+
+@media (forced-colors: active) {
+  .chart__bar, .chart__arc { forced-color-adjust: none; }
+}

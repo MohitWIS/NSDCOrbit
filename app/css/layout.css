@@ -1,0 +1,344 @@
+/* ==========================================================================
+   NSDC Orbit — App shell
+   Single-column layout: a sticky glass topbar over a scrolling content
+   column. No sidebar — navigation lives in the topbar as a horizontal
+   strip, which stays out of the way and needs no drawer on mobile.
+   ========================================================================== */
+
+.app {
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Ambient brand glow — the "orbit" motif. Purely decorative, sits behind all. */
+.app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(0, 138, 210, 0.10), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, rgba(174, 201, 10, 0.08), transparent 55%),
+    radial-gradient(48rem 34rem at 60% 110%, rgba(215, 53, 37, 0.06), transparent 55%);
+}
+
+/* The tri-colour NSDC bar, kept from the original dashboard. */
+.brandbar {
+  height: 3px;
+  flex-shrink: 0;
+  background: var(--brand-bar);
+}
+
+/* ==========================================================================
+   Topbar
+   ========================================================================== */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  min-height: var(--topbar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding-inline: var(--space-5);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border-block-end: 1px solid var(--glass-border);
+}
+
+/* ---- Brand ------------------------------------------------------------- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.brand__mark {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--brand-blue), var(--brand-blue-deep));
+  color: var(--ink-on-brand);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.brand__text { display: flex; flex-direction: column; min-width: 0; }
+
+.brand__name {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.brand__org {
+  font-size: var(--text-2xs);
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+}
+
+/* ---- Heading ------------------------------------------------------------ */
+
+.topbar__heading {
+  min-width: 0;
+  flex: 1;
+  padding-inline-start: var(--space-4);
+  border-inline-start: 1px solid var(--line-hairline);
+}
+
+.topbar__title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+}
+
+.topbar__crumb {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ---- Navigation strip ---------------------------------------------------
+   Hidden while there is only one section — a nav with a single destination
+   is noise. It reappears automatically as sections are added.             */
+
+.topnav {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-5);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border-block-end: 1px solid var(--glass-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: calc(var(--z-sticky) - 1);
+}
+
+.topnav::-webkit-scrollbar { display: none; }
+
+.topnav.u-hide { display: none; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  position: relative;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.nav-item:hover { color: var(--ink-primary); text-decoration: none; }
+
+.nav-item__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+
+.nav-item__count {
+  min-width: 20px;
+  padding: 0 6px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--ink-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-item.is-active { color: var(--brand-blue); font-weight: var(--weight-semibold); }
+
+.nav-item.is-active .nav-item__count {
+  background: var(--brand-blue);
+  color: var(--ink-on-brand);
+}
+
+/* Active marker rides the bottom edge */
+.nav-item.is-active::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--space-2);
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
+  background: var(--brand-blue);
+}
+
+/* ---- Command palette trigger -------------------------------------------- */
+
+.omni-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 200px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-hairline);
+  background: var(--surface-1);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.omni-trigger:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.omni-trigger__label { flex: 1; text-align: start; }
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line-hairline);
+  background: var(--surface-2);
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   Content
+   ========================================================================== */
+
+.content {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-5) var(--space-16);
+}
+
+/* ==========================================================================
+   Section & grid primitives
+   ========================================================================== */
+
+.section + .section { margin-top: var(--space-8); }
+
+.section__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-block-end: var(--space-4);
+}
+
+.section__title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+}
+
+.section__desc {
+  font-size: var(--text-sm);
+  color: var(--ink-secondary);
+  margin-block-start: 2px;
+}
+
+.section__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Auto-fitting grid — the column count follows available width, so it needs
+   no per-breakpoint overrides. */
+.grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.grid--kpi { grid-template-columns: repeat(auto-fit, minmax(min(215px, 100%), 1fr)); }
+.grid--wide { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
+.grid--halves { grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); }
+
+.span-2 { grid-column: span 2; }
+@media (max-width: 900px) { .span-2 { grid-column: span 1; } }
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .topbar { gap: var(--space-3); padding-inline: var(--space-4); }
+  .topnav { padding-inline: var(--space-4); }
+  .omni-trigger { min-width: 0; }
+  .omni-trigger__label { display: none; }
+}
+
+@media (max-width: 719px) {
+  /* The section title in the topbar duplicates the heading in the content
+     column on narrow screens — drop it and let the brand stand alone. */
+  .topbar__heading { display: none; }
+
+  .brand__text { display: none; }
+
+  .topbar {
+    padding-inline: var(--space-4);
+    justify-content: space-between;
+  }
+
+  .content { padding: var(--space-4) var(--space-4) var(--space-12); }
+
+  .section__head { align-items: flex-start; }
+
+  .grid { gap: var(--space-3); }
+}
+
+/* Print — drop the chrome, keep the data */
+@media print {
+  .topbar, .topnav, .brandbar { display: none !important; }
+  .app::before { display: none; }
+  .card { break-inside: avoid; box-shadow: none; border: 1px solid #ccc; }
+}

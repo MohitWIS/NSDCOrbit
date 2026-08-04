@@ -1,0 +1,155 @@
+/* ==========================================================================
+   NSDC Orbit — Reset & base typography
+   Scoped defensively: a Creator widget renders inside an iframe, but we still
+   avoid bare element selectors leaking (the lesson from NSDCTP's global.css,
+   where bare `table`/`th`/`td` rules fought the component styles).
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--ink-primary);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--duration-base) var(--ease-out),
+    color var(--duration-base) var(--ease-out);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  color: var(--ink-primary);
+  letter-spacing: -0.011em;
+}
+
+p { margin: 0; }
+
+ul, ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--brand-blue);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover { text-decoration: underline; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+img, svg { display: block; max-width: 100%; }
+
+svg { flex-shrink: 0; }
+
+/* Keyboard focus only — never a ring on mouse clicks. */
+:focus { outline: none; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------------------------------------------------------
+   Utilities
+   ------------------------------------------------------------------------- */
+
+.u-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u-tabular { font-variant-numeric: tabular-nums; }
+
+.u-hide { display: none !important; }
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: -100px;
+  z-index: var(--z-toast);
+  padding: var(--space-3) var(--space-4);
+  background: var(--brand-blue);
+  color: var(--ink-on-brand);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-semibold);
+  transition: top var(--duration-base) var(--ease-out);
+}
+
+.skip-link:focus { top: var(--space-4); text-decoration: none; }
+
+/* -------------------------------------------------------------------------
+   Scrollbars — slim, themed, non-intrusive
+   ------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--ink-muted); }
+
+/* -------------------------------------------------------------------------
+   Selection
+   ------------------------------------------------------------------------- */
+
+::selection {
+  background: rgba(0, 138, 210, 0.22);
+  color: var(--ink-primary);
+}

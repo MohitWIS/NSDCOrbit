@@ -1,0 +1,308 @@
+/* ==========================================================================
+   NSDC Orbit — Design Tokens
+   --------------------------------------------------------------------------
+   The single source of truth for colour, type, space, radius, shadow, motion.
+   Nothing below this file should contain a raw hex value.
+
+   Dark mode is *selected*, not flipped: every dark value was chosen for the
+   dark surface and validated against it. Both scopes are declared so the OS
+   setting and the in-app toggle each win in the right direction.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Brand (NSDC) ---------------------------------------------------- */
+  --brand-blue: #008ad2;
+  --brand-blue-deep: #0a509f;
+  --brand-lime: #aec90a;
+  --brand-green: #51b748;
+  --brand-red: #d73525;
+  --brand-ink: #444445;
+
+  /* Tri-colour accent bar carried over from the NSDCTP dashboard */
+  --brand-bar: linear-gradient(
+    to right,
+    var(--brand-lime) 0 33.33%,
+    var(--brand-blue) 33.33% 66.66%,
+    var(--brand-red) 66.66% 100%
+  );
+
+  /* ---- Surfaces -------------------------------------------------------- */
+  --surface-page: #f4f6fb;   /* app background            */
+  --surface-1: #ffffff;      /* cards — the chart surface */
+  --surface-2: #f7f9fc;      /* insets, table headers     */
+  --surface-3: #eef2f8;      /* hover wash                */
+  --surface-inverse: #101725;
+
+  /* Glass layer — the sidebar and topbar sit on this */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(13, 18, 32, 0.08);
+  --glass-blur: 18px;
+
+  /* ---- Ink ------------------------------------------------------------- */
+  --ink-primary: #0d1220;
+  --ink-secondary: #4d5666;
+  --ink-muted: #7b8697;
+  --ink-inverse: #ffffff;
+  --ink-on-brand: #ffffff;
+
+  /* ---- Lines ----------------------------------------------------------- */
+  --line-hairline: rgba(13, 18, 32, 0.09);
+  --line-strong: rgba(13, 18, 32, 0.16);
+  --grid-line: #e6ebf3;
+  --axis-line: #cbd4e1;
+
+  /* ---- Categorical series ---------------------------------------------
+     Validated light @ #ffffff — worst adjacent CVD ΔE 10.6, normal-vision
+     ΔE 19.6. Slots 1–3 additionally clear the all-pairs gate, so scatter /
+     bubble / small-multiple forms cap at three series.
+     Slots 4 and 5 fall below 3:1 on the light surface: the relief rule
+     applies — those charts ship direct labels or the table view.
+     --------------------------------------------------------------------- */
+  --series-1: #0071bc;
+  --series-2: #d73525;
+  --series-3: #00997a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #4a3aa7;
+
+  /* ---- Sequential ramp (single hue, light → dark) ----------------------
+     For ordinal use start no lighter than step 250 (2:1 vs surface).      */
+  --seq-100: #cde3f7;
+  --seq-250: #7fb6e4;
+  --seq-400: #2f8fd1;
+  --seq-550: #1a6aa6;
+  --seq-700: #0d3f6b;
+
+  /* ---- Diverging (blue ↔ red, neutral gray midpoint) -------------------- */
+  --div-neg: #0071bc;
+  --div-mid: #eceef2;
+  --div-pos: #d73525;
+
+  /* ---- Status (fixed — never themed, never reused as a series) ---------- */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --status-neutral: #7b8697;
+
+  /* Tinted status backgrounds for pills */
+  --status-good-bg: rgba(12, 163, 12, 0.12);
+  --status-warning-bg: rgba(250, 178, 25, 0.16);
+  --status-serious-bg: rgba(236, 131, 90, 0.16);
+  --status-critical-bg: rgba(208, 59, 59, 0.12);
+  --status-neutral-bg: rgba(123, 134, 151, 0.12);
+
+  /* Delta cues — paired with an arrow glyph, never colour alone */
+  --delta-up: #006300;
+  --delta-down: #c02a2a;
+
+  /* ---- Elevation ------------------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(13, 18, 32, 0.05);
+  --shadow-sm: 0 1px 3px rgba(13, 18, 32, 0.07), 0 1px 2px rgba(13, 18, 32, 0.04);
+  --shadow-md: 0 4px 14px rgba(13, 18, 32, 0.08), 0 1px 3px rgba(13, 18, 32, 0.05);
+  --shadow-lg: 0 12px 32px rgba(13, 18, 32, 0.12), 0 2px 8px rgba(13, 18, 32, 0.06);
+  --shadow-xl: 0 24px 64px rgba(13, 18, 32, 0.18);
+  --ring-focus: 0 0 0 3px rgba(0, 138, 210, 0.35);
+
+  /* ---- Typography ------------------------------------------------------ */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-2xs: 0.6875rem; /* 11px */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.8125rem;  /* 13px */
+  --text-base: 0.875rem; /* 14px */
+  --text-md: 1rem;       /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.375rem;   /* 22px */
+  --text-2xl: 1.75rem;   /* 28px */
+  --text-3xl: 2.25rem;   /* 36px */
+  --text-hero: 2.75rem;  /* 44px */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  /* ---- Space (4px base) ------------------------------------------------ */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ---- Radius ---------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 360ms;
+  --duration-chart: 700ms;
+
+  /* ---- Layout ---------------------------------------------------------- */
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 68px;
+  --topbar-height: 60px;
+  --content-max: 1440px;
+  --z-content: 1;
+  --z-sticky: 20;
+  --z-sidebar: 40;
+  --z-overlay: 60;
+  --z-modal: 70;
+  --z-toast: 80;
+  --z-tooltip: 90;
+}
+
+/* ==========================================================================
+   Dark mode — selected values, validated against the dark card surface.
+   Declared twice: once for the OS preference (guarded so an explicit light
+   stamp still wins) and once for the toggle.
+   ========================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --surface-page: #0b0f18;
+    --surface-1: #121722;   /* chart surface the dark series were validated on */
+    --surface-2: #172030;
+    --surface-3: #1e2839;
+    --surface-inverse: #f4f6fb;
+
+    --glass-bg: rgba(18, 23, 34, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.09);
+
+    --ink-primary: #f2f5fa;
+    --ink-secondary: #a9b4c6;
+    --ink-muted: #79859a;
+    --ink-inverse: #0d1220;
+
+    --line-hairline: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --grid-line: #1f2a3b;
+    --axis-line: #2f3c52;
+
+    /* Same six hues, re-stepped for the dark band (OKLCH L 0.48–0.67).
+       All six clear 3:1 on #121722; slots 1–3 clear all-pairs.           */
+    --series-1: #3b9ae0;
+    --series-2: #e0604a;
+    --series-3: #0f9c78;
+    --series-4: #bd880c;
+    --series-5: #d96792;
+    --series-6: #8e83e6;
+
+    --seq-100: #10304d;
+    --seq-250: #17527f;
+    --seq-400: #2f8fd1;
+    --seq-550: #62aee2;
+    --seq-700: #a8d3f2;
+
+    --div-neg: #3b9ae0;
+    --div-mid: #2a3446;
+    --div-pos: #e0604a;
+
+    --status-good-bg: rgba(12, 163, 12, 0.18);
+    --status-warning-bg: rgba(250, 178, 25, 0.18);
+    --status-serious-bg: rgba(236, 131, 90, 0.18);
+    --status-critical-bg: rgba(208, 59, 59, 0.20);
+    --status-neutral-bg: rgba(169, 180, 198, 0.14);
+
+    --delta-up: #0ca30c;
+    --delta-down: #e0604a;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.7);
+    --ring-focus: 0 0 0 3px rgba(59, 154, 224, 0.45);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-page: #0b0f18;
+  --surface-1: #121722;
+  --surface-2: #172030;
+  --surface-3: #1e2839;
+  --surface-inverse: #f4f6fb;
+
+  --glass-bg: rgba(18, 23, 34, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.09);
+
+  --ink-primary: #f2f5fa;
+  --ink-secondary: #a9b4c6;
+  --ink-muted: #79859a;
+  --ink-inverse: #0d1220;
+
+  --line-hairline: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --grid-line: #1f2a3b;
+  --axis-line: #2f3c52;
+
+  --series-1: #3b9ae0;
+  --series-2: #e0604a;
+  --series-3: #0f9c78;
+  --series-4: #bd880c;
+  --series-5: #d96792;
+  --series-6: #8e83e6;
+
+  --seq-100: #10304d;
+  --seq-250: #17527f;
+  --seq-400: #2f8fd1;
+  --seq-550: #62aee2;
+  --seq-700: #a8d3f2;
+
+  --div-neg: #3b9ae0;
+  --div-mid: #2a3446;
+  --div-pos: #e0604a;
+
+  --status-good-bg: rgba(12, 163, 12, 0.18);
+  --status-warning-bg: rgba(250, 178, 25, 0.18);
+  --status-serious-bg: rgba(236, 131, 90, 0.18);
+  --status-critical-bg: rgba(208, 59, 59, 0.20);
+  --status-neutral-bg: rgba(169, 180, 198, 0.14);
+
+  --delta-up: #0ca30c;
+  --delta-down: #e0604a;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --ring-focus: 0 0 0 3px rgba(59, 154, 224, 0.45);
+}
+
+/* Respect the OS reduced-motion setting everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 1ms;
+    --duration-base: 1ms;
+    --duration-slow: 1ms;
+    --duration-chart: 1ms;
+  }
+}

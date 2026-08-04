@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>NSDC Orbit</title>
+
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/charts.css">
+
+  <script src="https://js.zohostatic.com/creator/widgets/version/2.0/widgetsdk-min.js"></script>
+
+  <script>
+    /* Apply the stored theme before first paint so dark mode never flashes
+       white. Kept inline and tiny on purpose. */
+    (function () {
+      try {
+        var mode = localStorage.getItem("orbit.theme");
+        if (mode && mode !== "auto") document.documentElement.setAttribute("data-theme", mode);
+      } catch (e) { /* storage blocked — fall back to the OS preference */ }
+    })();
+  </script>
+</head>
+
+<body>
+  <a class="skip-link" href="#view">Skip to content</a>
+
+  <div class="app">
+
+    <div class="brandbar" aria-hidden="true"></div>
+
+    <div class="main">
+
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand__mark" aria-hidden="true">NO</div>
+          <div class="brand__text">
+            <span class="brand__name">Orbit</span>
+            <span class="brand__org">NSDC</span>
+          </div>
+        </div>
+
+        <div class="topbar__heading">
+          <div class="topbar__title" id="topbarTitle">Overview</div>
+          <div class="topbar__crumb" id="topbarCrumb"></div>
+        </div>
+
+        <div class="topbar__actions">
+          <button class="omni-trigger" id="omniTrigger" type="button" aria-label="Open command palette">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <span class="omni-trigger__label">Search or jump to…</span>
+            <span class="kbd">Ctrl K</span>
+          </button>
+
+          <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle theme"></button>
+        </div>
+      </header>
+
+      <!-- Populated from the SECTIONS registry; hidden while there is only one -->
+      <nav class="topnav u-hide" id="topnav" aria-label="Sections"></nav>
+
+      <main class="content" id="content">
+        <div class="mock-banner u-hide" id="mockBanner">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true">
+            <path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+          </svg>
+          Sample data — the Creator SDK isn't available in this preview. Figures are illustrative, not live.
+        </div>
+
+        <div id="view"><!-- the active section renders here --></div>
+      </main>
+
+    </div>
+  </div>
+
+  <!-- ================= Command palette ================= -->
+  <div class="omni" id="omni" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="omni__panel">
+      <div class="omni__search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" aria-hidden="true" style="color:var(--ink-muted)">
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+        <input class="omni__input" id="omniInput" type="text" placeholder="Search sections and actions…"
+          autocomplete="off" spellcheck="false" aria-label="Search">
+        <span class="kbd">Esc</span>
+      </div>
+      <div class="omni__results" id="omniResults"></div>
+      <div class="omni__foot">
+        <span>↑↓ navigate</span>
+        <span>↵ select</span>
+        <span>Esc close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Toasts ================= -->
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="js/core.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/widget.js"></script>
+</body>
+
+</html>
