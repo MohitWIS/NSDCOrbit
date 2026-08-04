@@ -165,7 +165,7 @@
 
     /* Geometry. The bottom band is reserved for x-axis labels so they are
        never clipped by the container height. */
-    var W = 760, H = height;
+    var W = opts.width || 760, H = height;
     var padL = 44, padR = 12, padT = 18, padB = 34;
     var plotW = W - padL - padR;
     var plotH = H - padT - padB;
@@ -304,6 +304,180 @@
   }
 
   /* ======================================================================
+     Donut — part-to-whole at a glance
+
+     Legal here because this is a genuine part-to-whole split (every overdue
+     OM falls in exactly one age band) with four segments, inside the ≤6
+     limit. Segments are separated by a surface-coloured gap rather than a
+     stroke, and the hole carries the total so the headline figure is not
+     lost to the geometry.
+     ====================================================================== */
+
+  function polar(cx, cy, r, angle) {
+    var rad = (angle - 90) * Math.PI / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  }
+
+  /** Annular sector path between two angles. */
+  function arcPath(cx, cy, rOuter, rInner, start, end) {
+    /* A full circle cannot be drawn as a single arc — split it. */
+    if (end - start >= 359.999) {
+      return "M" + (cx - rOuter) + "," + cy +
+        "A" + rOuter + "," + rOuter + " 0 1 1 " + (cx + rOuter) + "," + cy +
+        "A" + rOuter + "," + rOuter + " 0 1 1 " + (cx - rOuter) + "," + cy + "Z" +
+        "M" + (cx - rInner) + "," + cy +
+        "A" + rInner + "," + rInner + " 0 1 0 " + (cx + rInner) + "," + cy +
+        "A" + rInner + "," + rInner + " 0 1 0 " + (cx - rInner) + "," + cy + "Z";
+    }
+
+    var large = end - start > 180 ? 1 : 0;
+    var o1 = polar(cx, cy, rOuter, start), o2 = polar(cx, cy, rOuter, end);
+    var i2 = polar(cx, cy, rInner, end), i1 = polar(cx, cy, rInner, start);
+
+    return "M" + o1.x.toFixed(2) + "," + o1.y.toFixed(2) +
+      "A" + rOuter + "," + rOuter + " 0 " + large + " 1 " + o2.x.toFixed(2) + "," + o2.y.toFixed(2) +
+      "L" + i2.x.toFixed(2) + "," + i2.y.toFixed(2) +
+      "A" + rInner + "," + rInner + " 0 " + large + " 0 " + i1.x.toFixed(2) + "," + i1.y.toFixed(2) +
+      "Z";
+  }
+
+  /**
+   * @param {Array<{label,value,ramp?,slot?}>} data
+   * @param {Object} opts { size, valueLabel, categoryLabel, centerLabel, title }
+   */
+  function donutChart(data, opts) {
+    opts = opts || {};
+    var valueLabel = opts.valueLabel || "Count";
+    var categoryLabel = opts.categoryLabel || "Category";
+
+    var host = el("div", { class: "chart chart--donut" });
+
+    var live = (data || []).filter(function (d) { return d.value > 0; });
+    var total = live.reduce(function (sum, d) { return sum + d.value; }, 0);
+
+    if (!total) {
+      host.appendChild(emptyState("Nothing to show"));
+      return host;
+    }
+
+    var size = opts.size || 240;
+    var cx = size / 2, cy = size / 2;
+    var rOuter = size / 2 - 4;
+    var rInner = rOuter * 0.62;
+
+    /* A 2px surface gap between segments, expressed as an angle so it stays
+       2px at the outer edge whatever the radius. */
+    var gapDeg = Math.min(3, (2 / (2 * Math.PI * rOuter)) * 360);
+
+    var svg = svgEl("svg", {
+      class: "chart__svg",
+      viewBox: "0 0 " + size + " " + size,
+      width: size, height: size,
+      role: "img",
+      "aria-label": (opts.title || valueLabel) + " — donut chart of " +
+        live.length + " segments totalling " + Orbit.num(total) +
+        ". The same values are available in the table view."
+    });
+
+    var tooltip = makeTooltip(host);
+    var angle = 0;
+
+    /* Smallest sweep that still reads as a sliver on screen. */
+    var MIN_SWEEP = 0.6;
+
+    live.forEach(function (d, i) {
+      var sweep = (d.value / total) * 360;
+
+      /* Trim each end for the surface gap — but never by so much that a
+         genuine segment disappears. One record out of several hundred is a
+         sub-degree wedge, and a fixed gap would erase it entirely: the band
+         would hold a real count yet vanish from the chart. Cap the trim at
+         a quarter of the sweep, then enforce a minimum visible angle. */
+      var trim = live.length > 1 ? Math.min(gapDeg / 2, sweep * 0.25) : 0;
+      var start = angle + trim;
+      var end = angle + sweep - trim;
+
+      if (end - start < MIN_SWEEP) {
+        start = angle;
+        end = angle + Math.max(sweep, MIN_SWEEP);
+      }
+
+      angle += sweep;
+
+      var fill = d.ramp || "var(--series-" + (d.slot || (i + 1)) + ")";
+
+      var seg = svgEl("path", {
+        class: "chart__arc",
+        d: arcPath(cx, cy, rOuter, rInner, start, end),
+        fill: fill,
+        tabindex: "0",
+        role: "button",
+        "aria-label": d.label + ": " + Orbit.num(d.value) + " " + valueLabel +
+          ", " + Orbit.pct((d.value / total) * 100, 0) + " of the total"
+      });
+
+      function enter() {
+        host.classList.add("has-hover");
+        seg.classList.add("is-hovered");
+        var mid = polar(cx, cy, (rOuter + rInner) / 2, (start + end) / 2);
+        var rect = host.getBoundingClientRect();
+        var scale = (rect.width || size) / size;
+        tooltip.show(mid.x * scale, mid.y * scale, d.label, [
+          { label: valueLabel, value: Orbit.num(d.value), color: fill },
+          { label: "Share", value: Orbit.pct((d.value / total) * 100, 0) }
+        ]);
+      }
+
+      function leave() {
+        host.classList.remove("has-hover");
+        seg.classList.remove("is-hovered");
+        tooltip.hide();
+      }
+
+      seg.addEventListener("mouseenter", enter);
+      seg.addEventListener("mouseleave", leave);
+      seg.addEventListener("focus", enter);
+      seg.addEventListener("blur", leave);
+      svg.appendChild(seg);
+    });
+
+    /* Hero figure in the hole */
+    svg.appendChild(svgEl("text", {
+      class: "chart__center-value",
+      x: cx, y: cy + 2, text: Orbit.num(total)
+    }));
+    svg.appendChild(svgEl("text", {
+      class: "chart__center-label",
+      x: cx, y: cy + 20, text: opts.centerLabel || valueLabel
+    }));
+
+    host.appendChild(svg);
+
+    /* Scale legend — required for a semantic-heat ramp, and it carries the
+       values so nothing depends on reading the wedges. */
+    var legend = el("div", { class: "legend legend--stack" });
+    (data || []).forEach(function (d, i) {
+      var fill = d.ramp || "var(--series-" + (d.slot || (i + 1)) + ")";
+      legend.appendChild(el("span", {
+        class: "legend__item" + (d.value === 0 ? " is-muted" : "")
+      }, [
+        el("span", { class: "legend__swatch", style: "background:" + fill }),
+        el("span", { class: "legend__name", text: d.label }),
+        el("span", { class: "legend__value", text: Orbit.num(d.value) }),
+        el("span", {
+          class: "legend__share",
+          text: total ? Orbit.pct((d.value / total) * 100, 0) : "0%"
+        })
+      ]));
+    });
+    host.appendChild(legend);
+
+    host.appendChild(tableTwin(data, categoryLabel, valueLabel));
+
+    return host;
+  }
+
+  /* ======================================================================
      Horizontal bar chart — magnitude across named categories
 
      The right form when categories are nominal, numerous, or have long
@@ -331,11 +505,13 @@
 
     /* Geometry: rows are a fixed height so the chart grows with the data
        instead of squeezing. */
-    var W = 760;
-    var rowH = 30;
+    var W = opts.width || 760;
+    var rowH = opts.rowH || 28;
     var gap = 2;                 /* 2px surface gap between adjacent bars */
-    var padL = 132;              /* room for category labels */
-    var padR = 56;               /* room for the value label past the bar end */
+    /* Label gutter tracks the column width, with a floor that still fits
+       "In Progress" and a ceiling so it never dominates a wide card. */
+    var padL = opts.padL || Math.round(Math.min(132, Math.max(78, W * 0.26)));
+    var padR = 52;               /* room for the value label past the bar end */
     var padT = 8;
     var padB = 26;
     var plotW = W - padL - padR;
@@ -403,8 +579,11 @@
           fill: "var(--axis-line)", stroke: "none"
         }));
       } else {
+        /* A row may carry an explicit ramp colour (ordered scales such as
+           age bands) instead of a categorical slot. */
         svg.appendChild(svgEl("path", {
-          class: "chart__bar s" + slot + "-fill",
+          class: "chart__bar" + (d.ramp ? "" : " s" + slot + "-fill"),
+          fill: d.ramp || null,
           d: hBarPath(padL, y, barW, barH),
           style: "animation-delay:" + (i * 30) + "ms"
         }));
@@ -443,7 +622,11 @@
           (y) * scale,
           d.label,
           [
-            { label: valueLabel, value: Orbit.num(d.value), color: "var(--series-" + slot + ")" },
+            {
+              label: valueLabel,
+              value: Orbit.num(d.value),
+              color: d.ramp || "var(--series-" + slot + ")"
+            },
             d.group ? { label: "Group", value: d.group } : null
           ].filter(Boolean)
         );
@@ -536,23 +719,78 @@
     ]);
   }
 
-  /**
-   * Chart ⇄ Table switch. Returns the control; wire it to a chart container.
-   */
-  function viewToggle(chartHost) {
-    var svg = null, table = null;
+  /* ======================================================================
+     Responsive host
 
-    function refs() {
-      svg = chartHost.querySelector(".chart__svg");
-      table = chartHost.querySelector(".chart-tableview");
-    }
+     Charts draw at their container's real pixel width — one SVG unit is one
+     CSS pixel — rather than scaling a fixed viewBox to fit. Scaling a fixed
+     viewBox is what makes a chart in a half-width column render its 11px
+     axis labels at 7px: legible at full width, unreadable beside a sibling.
+     Redrawing instead keeps type, marks and padding at their intended size
+     whatever the column width.
+     ====================================================================== */
 
-    function select(mode) {
-      refs();
+  function responsive(renderFn) {
+    var host = el("div", { class: "chart-host" });
+    host.dataset.mode = "chart";
+
+    var lastWidth = 0;
+
+    /* Re-apply the chart/table choice after a redraw replaces the nodes. */
+    function applyMode() {
+      var svg = host.querySelector(".chart__svg");
+      var table = host.querySelector(".chart-tableview");
       if (!svg || !table) return;
-      var showTable = mode === "table";
+      var showTable = host.dataset.mode === "table";
       svg.classList.toggle("u-hide", showTable);
       table.classList.toggle("is-visible", showTable);
+    }
+
+    function draw() {
+      var width = Math.round(host.clientWidth);
+      if (!width) return;
+      /* Ignore sub-pixel churn; redraw only on a real size change. */
+      if (Math.abs(width - lastWidth) < 12) return;
+      lastWidth = width;
+      Orbit.clear(host);
+      host.appendChild(renderFn(width));
+      applyMode();
+    }
+
+    host._applyMode = applyMode;
+    host._redraw = function () { lastWidth = 0; draw(); };
+
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(draw).observe(host);
+    } else {
+      window.addEventListener("resize", Orbit.debounce(draw, 150));
+    }
+
+    /* First paint once the host is in the document and has a width. */
+    setTimeout(draw, 0);
+
+    return host;
+  }
+
+  /**
+   * Chart ⇄ Table switch. Returns the control; wire it to a chart container
+   * (either a plain chart host or a responsive one).
+   */
+  function viewToggle(chartHost) {
+    function select(mode) {
+      chartHost.dataset.mode = mode;
+
+      if (chartHost._applyMode) {
+        chartHost._applyMode();
+      } else {
+        var svg = chartHost.querySelector(".chart__svg");
+        var table = chartHost.querySelector(".chart-tableview");
+        if (svg && table) {
+          svg.classList.toggle("u-hide", mode === "table");
+          table.classList.toggle("is-visible", mode === "table");
+        }
+      }
+
       Orbit.$$(".chart-toggle__btn", control).forEach(function (b) {
         var active = b.dataset.mode === mode;
         b.classList.toggle("is-active", active);
@@ -647,8 +885,10 @@
     sparkline: sparkline,
     barChart: barChart,
     hBarChart: hBarChart,
+    donutChart: donutChart,
     tableTwin: tableTwin,
     viewToggle: viewToggle,
+    responsive: responsive,
     emptyState: emptyState,
     errorState: errorState,
     chartSkeleton: chartSkeleton,

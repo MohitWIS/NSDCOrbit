@@ -119,6 +119,12 @@
 .kpi--teal .kpi__icon { background: rgba(0, 153, 122, 0.12); color: var(--series-3); }
 .kpi--amber .kpi__icon { background: rgba(237, 161, 0, 0.14); color: var(--series-4); }
 
+/* Status variants — used only where the colour genuinely means good/bad,
+   never as a stand-in for a fifth categorical slot. */
+.kpi--critical .kpi__icon { background: var(--status-critical-bg); color: var(--status-critical); }
+.kpi--critical .kpi__value { color: var(--status-critical); }
+.kpi--good .kpi__icon { background: var(--status-good-bg); color: var(--status-good); }
+
 .kpi__value {
   font-size: var(--text-3xl);
   font-weight: var(--weight-bold);
@@ -187,6 +193,110 @@
   height: 46px;
   opacity: 0.5;
   pointer-events: none;
+}
+
+/* ==========================================================================
+   Overdue panel
+   A count answers "how many". This answers "how bad" and "which ones",
+   which is what someone acting on it actually needs.
+   ========================================================================== */
+
+.overdue {
+  border-color: rgba(208, 59, 59, 0.28);
+  margin-block-start: var(--space-8);
+}
+
+.overdue--clear { border-color: rgba(12, 163, 12, 0.28); }
+
+.overdue .card__head { align-items: center; flex-wrap: wrap; }
+
+.overdue__badge {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--status-critical-bg);
+  color: var(--status-critical);
+}
+
+.overdue__badge--clear {
+  background: var(--status-good-bg);
+  color: var(--status-good);
+}
+
+.overdue__figures {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+.overdue__count {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--status-critical);
+}
+
+.overdue__aside {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  text-align: end;
+}
+
+/* The donut column fills the row's height and centres its chart, so the
+   ring sits mid-column however tall the work list beside it grows. */
+.overdue__pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.overdue__pane .chart-host {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overdue__section-title {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-muted);
+  margin-block-end: var(--space-2);
+}
+
+/* Days-late pill. The dot carries the age band, the number carries the
+   value — so the figure never sits on a coloured fill and never depends on
+   contrast against one. */
+.age-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-2) 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--ink-primary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.age-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+@media (max-width: 719px) {
+  .overdue__figures { margin-inline-start: 0; width: 100%; justify-content: space-between; }
+  .overdue .card__head { gap: var(--space-3); }
 }
 
 /* ==========================================================================

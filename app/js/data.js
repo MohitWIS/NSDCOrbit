@@ -50,6 +50,11 @@
          normalisation, so "In-Progress" and "IN PROGRESS" both match. */
       openStatuses: ["Open", "In Progress", "Assigned"],
 
+      /* An OM is overdue when its due date has passed and it is not in one
+         of these statuses. Only "Closed" per the stated rule — add
+         "Approved" / "Rejected" here if those should also stop the clock. */
+      overdueExcludeStatuses: ["Closed"],
+
       /* The full workflow vocabulary, in lifecycle order. Statuses are
          listed even when their count is zero — for a fixed vocabulary,
          "Overdue 0" is information, not an empty row.
@@ -442,6 +447,126 @@
   }
 
   Orbit.statusChartData = statusChartData;
+
+  /**
+   * Count overdue OMs: due date in the past, status not one of the excluded
+   * (resolved) ones.
+   *
+   * "Due Date < Today" is taken strictly, against the START of today — an OM
+   * due today is not yet overdue. Comparing against `new Date()` instead
+   * would make an OM due today count as overdue from one minute past
+   * midnight, which is wrong and moves during the day.
+   *
+   * Records with an unreadable due date are counted separately rather than
+   * assumed current; an unparseable date is a data problem, not an on-time
+   * OM.
+   *
+   * Also returns an ageing split, because "42 overdue" and "42 overdue, the
+   * oldest by six months" call for very different responses.
+   */
+  function summariseOverdue(records, dateField, statusField, excludeStatuses, ref) {
+    var now = ref || new Date();
+    var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var DAY = 86400000;
+
+    var excluded = {};
+    (excludeStatuses || ["Closed"]).forEach(function (label) {
+      var key = normStatus(label);
+      excluded[key] = true;
+      excluded[key.replace(/ /g, "")] = true;
+    });
+
+    /* Age bands are an ORDERED scale, so they carry a ramp rather than
+       categorical slots — a categorical palette would imply the bands are
+       unrelated identities instead of increasing severity.
+
+       The ramp is "semantic heat" (amber → red), the one documented
+       multi-hue sequential exception: here the hue shift carries meaning,
+       amber reading as mild and red as serious. It ships with a scale
+       legend, as that exception requires. Validated with --ordinal in both
+       modes: monotone lightness, adjacent ΔL ≥ 0.06, and the step nearest
+       the surface clearing 2:1. */
+    var buckets = [
+      { label: "1–7 days", min: 1, max: 7, value: 0, ramp: "var(--heat-1)" },
+      { label: "8–30 days", min: 8, max: 30, value: 0, ramp: "var(--heat-2)" },
+      { label: "31–90 days", min: 31, max: 90, value: 0, ramp: "var(--heat-3)" },
+      { label: "Over 90 days", min: 91, max: Infinity, value: 0, ramp: "var(--heat-4)" }
+    ];
+
+    var result = {
+      count: 0,
+      undated: 0,
+      resolved: 0,
+      oldestDays: 0,
+      totalDaysLate: 0,
+      buckets: buckets,
+      byStatus: {},
+      items: [],
+      asOf: todayStart
+    };
+
+    var f = reports.omRequests.fields;
+
+    if (!dateField) return result;
+
+    records.forEach(function (rec) {
+      var status = statusField ? rec[statusField] : null;
+      var key = normStatus(status);
+
+      if (excluded[key] || excluded[key.replace(/ /g, "")]) {
+        result.resolved++;
+        return;
+      }
+
+      var due = Orbit.parseDate(rec[dateField]);
+      if (!due) { result.undated++; return; }
+
+      var dueStart = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+      if (dueStart >= todayStart) return;
+
+      var daysLate = Math.round((todayStart - dueStart) / DAY);
+
+      result.count++;
+      result.totalDaysLate += daysLate;
+      if (daysLate > result.oldestDays) result.oldestDays = daysLate;
+
+      var label = String(status == null || String(status).trim() === ""
+        ? "(no status)" : String(status).trim());
+      result.byStatus[label] = (result.byStatus[label] || 0) + 1;
+
+      var band = null;
+      for (var i = 0; i < buckets.length; i++) {
+        if (daysLate >= buckets[i].min && daysLate <= buckets[i].max) {
+          buckets[i].value++;
+          band = buckets[i];
+          break;
+        }
+      }
+
+      /* Keep the record itself, not just the tally — the useful question is
+         "which ones", and a count alone cannot answer it. */
+      result.items.push({
+        number: rec[f.number] || rec.ID || "—",
+        reference: rec[f.reference] || "",
+        subject: rec[f.subject] || "—",
+        due: dueStart,
+        daysLate: daysLate,
+        status: label,
+        band: band ? band.label : "",
+        ramp: band ? band.ramp : "var(--seq-400)"
+      });
+    });
+
+    /* Most overdue first — that is the order someone works through them. */
+    result.items.sort(function (a, b) { return b.daysLate - a.daysLate; });
+
+    result.averageDaysLate = result.count
+      ? Math.round(result.totalDaysLate / result.count) : 0;
+
+    return result;
+  }
+
+  Orbit.summariseOverdue = summariseOverdue;
 
   /* ======================================================================
      Mock data

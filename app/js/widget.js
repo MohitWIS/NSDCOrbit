@@ -19,7 +19,8 @@
     user: null,
     omRecords: null,
     omSummary: null,
-    omStatus: null
+    omStatus: null,
+    omOverdue: null
   };
 
   /* ======================================================================
@@ -103,6 +104,9 @@
       state.omSummary = Orbit.summariseByPeriod(records, dateField);
       state.omStatus = Orbit.summariseByStatus(
         records, spec.fields.status, spec.openStatuses);
+      state.omOverdue = Orbit.summariseOverdue(
+        records, spec.fields.dueDate, spec.fields.status,
+        spec.overdueExcludeStatuses);
       paintOM(host);
       if (isRefetch) Orbit.toast("Refreshed — " + Orbit.num(records.length) + " OM records", "good");
     }).catch(function (err) {
@@ -218,22 +222,31 @@
       ])
     ]));
 
-    /* ---- Trend: 12 rolling months -------------------------------------- */
-    var chart = charts.barChart(s.series, {
-      slot: 1,
-      valueLabel: "OMs received",
-      categoryLabel: "Month",
-      title: "OMs received by month",
-      height: 280
+    /* ---- Charts, side by side ------------------------------------------
+       Both redraw at their column's real pixel width, so the type and marks
+       stay the intended size whether they sit in one column or two. */
+    var chartRow = el("div", { class: "grid grid--halves" });
+    slots.trend.appendChild(chartRow);
+
+    /* Trend: 12 rolling months */
+    var chart = charts.responsive(function (width) {
+      return charts.barChart(s.series, {
+        slot: 1,
+        width: width,
+        valueLabel: "OMs received",
+        categoryLabel: "Month",
+        title: "OMs received by month",
+        height: 320
+      });
     });
 
-    slots.trend.appendChild(el("div", { class: "card" }, [
+    chartRow.appendChild(el("div", { class: "card" }, [
       el("div", { class: "card__head" }, [
         el("div", {}, [
           el("div", { class: "card__title", text: "OMs received by month" }),
           el("div", {
             class: "card__subtitle",
-            text: "Rolling 12 months · counted from OM_Request_Form_Report"
+            text: "Rolling 12 months · by " + (s.dateField || "date")
           })
         ]),
         charts.viewToggle(chart)
@@ -247,21 +260,23 @@
       statusData = Orbit.statusChartData(st, Orbit.reports.omRequests);
       var sd = statusData;
 
-      var statusChart = charts.hBarChart(sd.rows, {
-        valueLabel: "OMs",
-        categoryLabel: "Status",
-        title: "OMs by status",
-        groups: sd.groups
+      var statusChart = charts.responsive(function (width) {
+        return charts.hBarChart(sd.rows, {
+          width: width,
+          valueLabel: "OMs",
+          categoryLabel: "Status",
+          title: "OMs by status",
+          groups: sd.groups
+        });
       });
 
-      slots.trend.appendChild(el("div", { class: "card", style: "margin-top:var(--space-8)" }, [
+      chartRow.appendChild(el("div", { class: "card" }, [
         el("div", { class: "card__head" }, [
           el("div", {}, [
             el("div", { class: "card__title", text: "OMs by status" }),
             el("div", {
               class: "card__subtitle",
-              text: Orbit.num(sd.total) + " records across " + sd.rows.length +
-                " workflow states · grouped by lifecycle stage"
+              text: sd.rows.length + " workflow states · grouped by lifecycle stage"
             })
           ]),
           charts.viewToggle(statusChart)
@@ -269,6 +284,13 @@
         el("div", { class: "card__body" }, [statusChart])
       ]));
     }
+
+    /* ---- Overdue panel --------------------------------------------------
+       Sits below the two charts: those set the context (how many arrive,
+       where they sit in the workflow), and this is the follow-on detail —
+       how bad the backlog is and which OMs to pick up first. */
+    var od = state.omOverdue;
+    if (od) renderOverduePanel(slots.trend, od);
 
     /* ---- Data-quality notices ------------------------------------------ */
     if (!s.dateField) {
@@ -281,6 +303,30 @@
           "Open the browser console for the list of fields present, then set dateField in js/data.js."
         )
       ]));
+    }
+
+    /* The Overdue KPI is computed from the due date, while the workflow also
+       has an "Overdue" status someone (or an automation) sets by hand. When
+       the two disagree the status field has drifted from reality — worth
+       naming, because the two numbers appear on the same screen and a
+       reader will otherwise assume one of them is broken. */
+    if (od && statusData) {
+      var labelled = statusData.rows.reduce(function (n, r) {
+        return r.label === "Overdue" ? r.value : n;
+      }, 0);
+
+      if (labelled !== od.count) {
+        slots.trend.appendChild(el("div", {
+          class: "mock-banner", style: "margin-top:var(--space-4)"
+        }, [
+          icon("alert", 14),
+          document.createTextNode(
+            Orbit.num(od.count) + " OMs are past their due date and not Closed, " +
+            "but " + Orbit.num(labelled) + " carry the “Overdue” status. " +
+            "The KPI uses the due date; the chart shows the status as recorded."
+          )
+        ]));
+      }
     }
 
     /* A status outside the configured vocabulary still gets charted, in the
@@ -326,6 +372,122 @@
         )
       ]));
     }
+  }
+
+  /* ======================================================================
+     Overdue panel
+     ====================================================================== */
+
+  var OVERDUE_LIST_SIZE = 8;
+
+  function renderOverduePanel(host, od) {
+    /* Nothing overdue is good news and gets a quiet, positive panel rather
+       than an alarming empty one. */
+    if (od.count === 0) {
+      host.appendChild(el("div", { class: "card card--pad overdue overdue--clear" }, [
+        el("div", { class: "row row--3" }, [
+          el("span", { class: "overdue__badge overdue__badge--clear" }, [icon("check", 18)]),
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Nothing overdue" }),
+            el("div", {
+              class: "card__subtitle",
+              text: "No OM is past its due date and still open, as of " +
+                Orbit.fmtDate(od.asOf) + "."
+            })
+          ])
+        ])
+      ]));
+      return;
+    }
+
+    var shown = od.items.slice(0, OVERDUE_LIST_SIZE);
+    var remaining = od.count - shown.length;
+
+    /* Ageing distribution. Part-to-whole across four ordered bands, so a
+       donut is a legitimate form here — and the hole carries the total. */
+    var ageChart = charts.responsive(function (width) {
+      return charts.donutChart(od.buckets, {
+        size: Math.max(180, Math.min(240, width - 40)),
+        valueLabel: "OMs",
+        categoryLabel: "Days past due",
+        centerLabel: "overdue",
+        title: "Overdue by age"
+      });
+    });
+
+    /* The work list */
+    var list = el("div", { class: "table-wrap" }, [
+      el("table", { class: "table" }, [
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", { text: "OM" }),
+            el("th", { text: "Subject" }),
+            el("th", { text: "Due" }),
+            el("th", { class: "table__num", text: "Days late" }),
+            el("th", { text: "Status" })
+          ])
+        ]),
+        el("tbody", {}, shown.map(function (item) {
+          return el("tr", {}, [
+            el("td", { "data-label": "OM", class: "table__strong", text: item.number }),
+            el("td", { "data-label": "Subject", text: item.subject }),
+            el("td", { "data-label": "Due", class: "table__muted", text: Orbit.fmtDate(item.due) }),
+            el("td", { "data-label": "Days late", class: "table__num" }, [
+              el("span", {
+                class: "age-pill",
+                title: item.band + " past due"
+              }, [
+                el("span", { class: "age-pill__dot", style: "background:" + item.ramp }),
+                document.createTextNode(Orbit.num(item.daysLate))
+              ])
+            ]),
+            el("td", { "data-label": "Status" }, [
+              el("span", { class: "badge badge--neutral", text: item.status })
+            ])
+          ]);
+        }))
+      ])
+    ]);
+
+    host.appendChild(el("div", { class: "card overdue" }, [
+      el("div", { class: "card__head" }, [
+        el("div", { class: "row row--3" }, [
+          el("span", { class: "overdue__badge" }, [icon("alert", 18)]),
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Overdue OMs" }),
+            el("div", {
+              class: "card__subtitle",
+              text: "Past the due date and not Closed, as of " + Orbit.fmtDate(od.asOf)
+            })
+          ])
+        ]),
+        el("div", { class: "overdue__figures" }, [
+          el("div", { class: "overdue__count", text: Orbit.num(od.count) }),
+          el("div", { class: "overdue__aside" }, [
+            el("div", { text: "oldest " + Orbit.num(od.oldestDays) + " days" }),
+            el("div", { class: "text-muted", text: "average " + Orbit.num(od.averageDaysLate) + " days" })
+          ])
+        ])
+      ]),
+
+      el("div", { class: "card__body" }, [
+        el("div", { class: "grid grid--halves" }, [
+          el("div", { class: "overdue__pane" }, [
+            el("div", { class: "overdue__section-title", text: "How late" }),
+            ageChart
+          ]),
+          el("div", { class: "stack stack--3" }, [
+            el("div", { class: "row row--between" }, [
+              el("div", { class: "overdue__section-title", text: "Most overdue" }),
+              remaining > 0
+                ? el("span", { class: "text-xs text-muted", text: "+" + Orbit.num(remaining) + " more" })
+                : null
+            ]),
+            list
+          ])
+        ])
+      ])
+    ]));
   }
 
   /** Delta cue: arrow glyph + value + period. Colour reinforces, never alone. */

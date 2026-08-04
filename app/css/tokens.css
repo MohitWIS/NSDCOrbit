@@ -75,6 +75,17 @@
   --seq-550: #1a6aa6;
   --seq-700: #0d3f6b;
 
+  /* ---- Semantic heat ramp (ordered severity: how late) -----------------
+     Multi-hue sequential is normally wrong, but "semantic heat" is the
+     documented exception — amber reads as mild and red as serious, which is
+     the meaning we want. It ships with a scale legend, as the exception
+     requires. Validated with --ordinal: monotone lightness, adjacent ΔL
+     ≥ 0.06, light end 2.27:1 against the card surface.                    */
+  --heat-1: #dda21e;
+  --heat-2: #e07a28;
+  --heat-3: #c93b28;
+  --heat-4: #8f1f1f;
+
   /* ---- Diverging (blue ↔ red, neutral gray midpoint) -------------------- */
   --div-neg: #0071bc;
   --div-mid: #eceef2;
@@ -219,6 +230,11 @@
     --seq-550: #62aee2;
     --seq-700: #a8d3f2;
 
+    --heat-1: #f2c04a;
+    --heat-2: #ee8b3a;
+    --heat-3: #df5a3c;
+    --heat-4: #b73f3f;
+
     --div-neg: #3b9ae0;
     --div-mid: #2a3446;
     --div-pos: #e0604a;
@@ -275,6 +291,11 @@
   --seq-400: #2f8fd1;
   --seq-550: #62aee2;
   --seq-700: #a8d3f2;
+
+  --heat-1: #f2c04a;
+  --heat-2: #ee8b3a;
+  --heat-3: #df5a3c;
+  --heat-4: #b73f3f;
 
   --div-neg: #3b9ae0;
   --div-mid: #2a3446;
