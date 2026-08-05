@@ -309,37 +309,6 @@ window.Orbit = window.Orbit || {};
   }
 
   /* ======================================================================
-     Theme
-     ====================================================================== */
-
-  var THEME_KEY = "orbit.theme";
-
-  var theme = {
-    get: function () {
-      try { return localStorage.getItem(THEME_KEY) || "auto"; }
-      catch (e) { return "auto"; }
-    },
-    set: function (mode) {
-      try { localStorage.setItem(THEME_KEY, mode); } catch (e) { /* private mode */ }
-      theme.apply(mode);
-    },
-    apply: function (mode) {
-      var root = document.documentElement;
-      if (mode === "auto") root.removeAttribute("data-theme");
-      else root.setAttribute("data-theme", mode);
-      document.dispatchEvent(new CustomEvent("orbit:themechange", { detail: { mode: mode } }));
-    },
-    toggle: function () {
-      var current = theme.get();
-      var isDark = current === "dark" ||
-        (current === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-      theme.set(isDark ? "light" : "dark");
-      return isDark ? "light" : "dark";
-    },
-    init: function () { theme.apply(theme.get()); }
-  };
-
-  /* ======================================================================
      Export
      ====================================================================== */
 
@@ -362,7 +331,6 @@ window.Orbit = window.Orbit || {};
   Orbit.ytdLabel = ytdLabel;
   Orbit.debounce = debounce;
   Orbit.delta = delta;
-  Orbit.theme = theme;
   Orbit.ready = ready;
   Orbit.MONTHS_SHORT = MONTHS_SHORT;
 })(window.Orbit);

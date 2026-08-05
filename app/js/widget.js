@@ -20,7 +20,12 @@
     omRecords: null,
     omSummary: null,
     omStatus: null,
-    omOverdue: null
+    omOverdue: null,
+    omClosed: null,
+    omReopened: null,
+    omPriority: null,
+    omMinistry: null,
+    omDepartment: null
   };
 
   /* ======================================================================
@@ -82,10 +87,11 @@
   }
 
   function kpiSkeleton() {
+    /* Mirrors the real tile: a label row and a figure row, nothing under
+       the number — so nothing shifts when the data lands. */
     return el("div", { class: "card kpi" }, [
-      el("div", { class: "skeleton skeleton--text", style: "width:45%" }),
-      el("div", { class: "skeleton skeleton--value" }),
-      el("div", { class: "skeleton skeleton--text", style: "width:60%" })
+      el("div", { class: "skeleton skeleton--text", style: "width:55%" }),
+      el("div", { class: "skeleton skeleton--value" })
     ]);
   }
 
@@ -107,6 +113,41 @@
       state.omOverdue = Orbit.summariseOverdue(
         records, spec.fields.dueDate, spec.fields.status,
         spec.overdueExcludeStatuses);
+
+      var closedField = Orbit.resolveClosedDateField(
+        records, spec, spec.fields.status, spec.closedStatuses);
+      state.omClosed = Orbit.summariseClosed(
+        records, closedField.field || dateField, spec.fields.status,
+        spec.closedStatuses);
+      state.omClosed.usedFallbackField = closedField.fallback;
+
+      /* Governance flag reads Stage = "Reopen", a different field and value
+         from the "Reopened" Status the lifecycle chart still uses. */
+      var stageField = Orbit.resolveField(
+        records, spec.fields.stage, spec.stageFieldCandidates, "stage");
+      state.omReopened = Orbit.countByField(
+        records, stageField, spec.reopenedStages);
+
+      var priorityField = Orbit.resolvePriorityField(records, spec);
+      state.omPriority = Orbit.priorityStatusMatrix(
+        records, priorityField, spec.fields.status, spec);
+
+      /* Ministry is a confirmed field name, so it is used directly — but
+         verify it is actually present before charting an empty axis. */
+      var ministryField = records.length &&
+        Object.prototype.hasOwnProperty.call(records[0], spec.fields.ministry)
+        ? spec.fields.ministry : null;
+      if (!ministryField && records.length) {
+        console.warn("[Orbit] No \"" + spec.fields.ministry + "\" field. " +
+          "Fields present: " + Object.keys(records[0]).join(", "));
+      }
+      state.omMinistry = Orbit.ministryVolume(records, ministryField, spec);
+
+      var deptField = Orbit.resolveField(
+        records, spec.fields.department, spec.departmentFieldCandidates,
+        "originating department");
+      state.omDepartment = Orbit.departmentWorkload(
+        records, deptField, spec.fields.status, spec);
       paintOM(host);
       if (isRefetch) Orbit.toast("Refreshed — " + Orbit.num(records.length) + " OM records", "good");
     }).catch(function (err) {
@@ -137,122 +178,166 @@
     Orbit.clear(slots.kpi);
     Orbit.clear(slots.trend);
 
-    var now = new Date();
-    var monthLabel = Orbit.MONTHS_SHORT[now.getMonth()] + " " + now.getFullYear();
-
-    /* ---- Tile 1: the headline — this month, with YTD alongside --------- */
-    var d = Orbit.delta(s.thisMonth, s.lastMonth);
-
-    slots.kpi.appendChild(el("div", { class: "card kpi kpi--blue" }, [
-      el("div", { class: "kpi__top" }, [
-        el("div", { class: "kpi__label" }, [
-          el("span", { class: "kpi__icon" }, [icon("doc", 15)]),
-          document.createTextNode("Total OMs received")
-        ])
-      ]),
-      el("div", { class: "kpi__split" }, [
-        el("div", { class: "kpi__split-item kpi__split-item--lead" }, [
-          el("span", { class: "kpi__split-label", text: "This month" }),
-          el("span", { class: "kpi__split-value", text: Orbit.num(s.thisMonth) })
-        ]),
-        el("div", { class: "kpi__split-item" }, [
-          el("span", { class: "kpi__split-label", text: Orbit.ytdLabel() + " to date" }),
-          el("span", { class: "kpi__split-value", text: Orbit.num(s.ytd) })
-        ])
-      ]),
-      el("div", { class: "kpi__meta" }, [
-        deltaChip(d, "vs " + Orbit.fmtMonth(Orbit.addMonths(now, -1))),
-        el("span", { text: monthLabel })
-      ]),
-      el("div", { class: "kpi__spark" }, [charts.sparkline(s.series, { slot: 1 })])
-    ]));
-
-    /* ---- Tile 2: YTD against the same window last year ----------------- */
-    var yd = Orbit.delta(s.ytd, s.prevYtd);
-
-    slots.kpi.appendChild(el("div", { class: "card kpi kpi--teal" }, [
-      el("div", { class: "kpi__top" }, [
-        el("div", { class: "kpi__label" }, [
-          el("span", { class: "kpi__icon" }, [icon("trend", 15)]),
-          document.createTextNode(Orbit.ytdLabel() + " to date")
-        ])
-      ]),
-      el("div", { class: "kpi__value", text: Orbit.num(s.ytd) }),
-      el("div", { class: "kpi__meta" }, [
-        deltaChip(yd, "vs same period last year"),
-        el("span", { text: "Since " + Orbit.fmtDate(s.ytdStart) })
-      ])
-    ]));
-
-    /* ---- Tile 3: live workload ----------------------------------------- */
+    /* ---- Tile 1: live workload ----------------------------------------- */
     var st = state.omStatus;
     if (st) {
       var parts = Object.keys(st.openBy).map(function (label) {
         return label + " " + Orbit.num(st.openBy[label]);
       });
 
-      slots.kpi.appendChild(el("div", { class: "card kpi kpi--amber" }, [
+      slots.kpi.appendChild(el("div", {
+        class: "card kpi kpi--blue",
+        title: parts.join(" · ")
+      }, [
         el("div", { class: "kpi__top" }, [
           el("div", { class: "kpi__label" }, [
             el("span", { class: "kpi__icon" }, [icon("clock", 15)]),
             document.createTextNode("Open / In progress")
           ])
         ]),
-        el("div", { class: "kpi__value", text: Orbit.num(st.open) }),
-        el("div", { class: "kpi__meta" }, [
-          el("span", { text: parts.join(" · ") }),
+        el("div", { class: "kpi__figure" }, [
+          el("span", { class: "kpi__value", text: Orbit.num(st.open) }),
           st.open > 0 && s.total > 0
-            ? el("span", { text: Orbit.pct((st.open / s.total) * 100, 0) + " of all OMs" })
+            ? el("span", {
+                class: "kpi__chip",
+                text: Orbit.pct((st.open / s.total) * 100, 0)
+              })
             : null
         ])
       ]));
     }
 
-    /* ---- Tile 4: all-time total in the report -------------------------- */
-    slots.kpi.appendChild(el("div", { class: "card kpi" }, [
+    /* ---- Tile 2: overdue ------------------------------------------------
+       Due date in the past and not Closed. Zero is good news, so the tile
+       reads as reassurance rather than shouting red at an empty count. */
+    var od = state.omOverdue;
+    if (od) {
+      var isClear = od.count === 0;
+      var ageParts = od.buckets
+        .filter(function (b) { return b.value > 0; })
+        .map(function (b) { return b.label + " " + Orbit.num(b.value); });
+
+      slots.kpi.appendChild(el("div", {
+        class: "card kpi " + (isClear ? "kpi--good" : "kpi--critical"),
+        title: isClear ? "Nothing past its due date"
+          : ageParts.join(" · ") + " · average " +
+            Orbit.num(od.averageDaysLate) + " days late"
+      }, [
+        el("div", { class: "kpi__top" }, [
+          el("div", { class: "kpi__label" }, [
+            el("span", { class: "kpi__icon" }, [icon(isClear ? "check" : "alert", 15)]),
+            document.createTextNode("Overdue")
+          ])
+        ]),
+        el("div", { class: "kpi__figure" }, [
+          el("span", { class: "kpi__value", text: Orbit.num(od.count) }),
+          isClear
+            ? null
+            : el("span", {
+                class: "kpi__chip",
+                text: "oldest " + Orbit.num(od.oldestDays) + "d"
+              })
+        ])
+      ]));
+    }
+
+    /* ---- Tile 3: closed this month, month over month --------------------
+       The comparison is against the same span of last month, not the whole
+       of it — see summariseClosed. The tile says which span it used, so the
+       percentage is never mistaken for a full-month figure. */
+    var cl = state.omClosed;
+    if (cl) {
+      slots.kpi.appendChild(el("div", {
+        class: "card kpi kpi--teal",
+        title: "vs " + (cl.isPartialMonth ? "1–" + cl.dayOfMonth + " " : "") +
+          cl.lastMonthLabel + " · " + cl.lastMonthLabel + " total " +
+          Orbit.num(cl.lastMonthTotal)
+      }, [
+        el("div", { class: "kpi__top" }, [
+          el("div", { class: "kpi__label" }, [
+            el("span", { class: "kpi__icon" }, [icon("check", 15)]),
+            document.createTextNode("Closed this month")
+          ])
+        ]),
+        el("div", { class: "kpi__figure" }, [
+          el("span", { class: "kpi__value", text: Orbit.num(cl.thisMonth) }),
+          /* The month-over-month comparison is the requirement, so it stays
+             — beside the figure rather than under it. The period it
+             compares against is in the tile's title. */
+          el("span", { class: "kpi__chip" }, [deltaChip(cl.delta, "")])
+        ])
+        /* No sparkline: this was the only tile carrying one once the tile
+           beside it was removed, so it read as a stray mark rather than a
+           trend — and with every month at zero it collapsed to a flat line
+           along the bottom edge. */
+      ]));
+    }
+
+    /* ---- Tile 4: reopened — governance flag -----------------------------
+       Read from STAGE = "Reopen", not from Status. A raw count cannot say
+       whether governance is slipping — 30 reopened out of 200 is a problem,
+       out of 20,000 it is noise — so the rate is shown beside it, against
+       records that actually carry a stage (a blank cannot be "Reopen", and
+       counting blanks would understate the rate). */
+    var ro = state.omReopened;
+    if (ro) {
+      var noneReopened = ro.count === 0;
+      var spellings = Object.keys(ro.matched);
+
+      slots.kpi.appendChild(el("div", {
+        class: "card kpi " + (ro.missing ? "" : noneReopened ? "kpi--good" : "kpi--warning"),
+        title: ro.missing
+          ? "No Stage field in the report"
+          : noneReopened
+            ? "Nothing at the Reopen stage"
+            : Orbit.num(ro.count) + " of " + Orbit.num(ro.denominator) +
+              " OMs at Stage \"Reopen\"" +
+              (spellings.length > 1 ? " · counted as: " + spellings.join(", ") : "")
+      }, [
+        el("div", { class: "kpi__top" }, [
+          el("div", { class: "kpi__label" }, [
+            el("span", { class: "kpi__icon" }, [
+              icon(ro.missing ? "alert" : noneReopened ? "check" : "refresh", 15)
+            ]),
+            document.createTextNode("Reopened")
+          ]),
+          el("span", { class: "badge badge--neutral", text: "Governance" })
+        ]),
+        el("div", { class: "kpi__figure" }, [
+          el("span", {
+            class: "kpi__value",
+            text: ro.missing ? "—" : Orbit.num(ro.count)
+          }),
+          /* The rate is what makes this a governance flag rather than a
+             bare count, so it stays — beside the figure. */
+          (!ro.missing && !noneReopened)
+            ? el("span", { class: "kpi__chip", text: Orbit.pct(ro.rate, 1) })
+            : null
+        ])
+      ]));
+    }
+
+    /* ---- Tile 5: all-time total in the report -------------------------- */
+    slots.kpi.appendChild(el("div", {
+      class: "card kpi kpi--violet",
+      title: "Everything in OM_Request_Form_Report"
+    }, [
       el("div", { class: "kpi__top" }, [
         el("div", { class: "kpi__label" }, [
           el("span", { class: "kpi__icon" }, [icon("inbox", 15)]),
           document.createTextNode("All records")
         ])
       ]),
-      el("div", { class: "kpi__value", text: Orbit.num(s.total) }),
-      el("div", { class: "kpi__meta" }, [
-        el("span", { text: "Everything in OM_Request_Form_Report" })
+      el("div", { class: "kpi__figure" }, [
+        el("span", { class: "kpi__value", text: Orbit.num(s.total) })
       ])
     ]));
 
     /* ---- Charts, side by side ------------------------------------------
-       Both redraw at their column's real pixel width, so the type and marks
-       stay the intended size whether they sit in one column or two. */
+       Each redraws at its column's real pixel width, so type and marks stay
+       the intended size whether they sit in one column or two. */
     var chartRow = el("div", { class: "grid grid--halves" });
     slots.trend.appendChild(chartRow);
-
-    /* Trend: 12 rolling months */
-    var chart = charts.responsive(function (width) {
-      return charts.barChart(s.series, {
-        slot: 1,
-        width: width,
-        valueLabel: "OMs received",
-        categoryLabel: "Month",
-        title: "OMs received by month",
-        height: 320
-      });
-    });
-
-    chartRow.appendChild(el("div", { class: "card" }, [
-      el("div", { class: "card__head" }, [
-        el("div", {}, [
-          el("div", { class: "card__title", text: "OMs received by month" }),
-          el("div", {
-            class: "card__subtitle",
-            text: "Rolling 12 months · by " + (s.dateField || "date")
-          })
-        ]),
-        charts.viewToggle(chart)
-      ]),
-      el("div", { class: "card__body" }, [chart])
-    ]));
 
     /* ---- Status breakdown ---------------------------------------------- */
     var statusData = null;
@@ -260,23 +345,35 @@
       statusData = Orbit.statusChartData(st, Orbit.reports.omRequests);
       var sd = statusData;
 
+      /* Status distribution as a donut. Each status carries its own
+         colour from the 12-slot categorical wheel, whose order was searched
+         and validated on the adjacent pairlist (worst adjacent CVD ΔE 15.7).
+         Statuses stay in lifecycle order so the ring still reads as a
+         progression, and the legend names every status with its count and
+         share. */
+      /* Pass the rows straight through rather than rebuilding them. An
+         earlier copy here dropped `cat`, so every status fell back to its
+         lifecycle-group slot and the four "Live work" statuses — Open, In
+         Progress, Assigned, Reopened — all rendered the same blue. */
       var statusChart = charts.responsive(function (width) {
-        return charts.hBarChart(sd.rows, {
-          width: width,
+        return charts.donutChart(sd.rows, {
+          /* The legend now sits beside the ring, so the ring takes roughly
+             45% of the card and leaves the rest for the list. */
+          size: Math.max(150, Math.min(220, Math.round(width * 0.46))),
           valueLabel: "OMs",
           categoryLabel: "Status",
-          title: "OMs by status",
-          groups: sd.groups
+          centerLabel: "total",
+          title: "Status distribution"
         });
       });
 
-      chartRow.appendChild(el("div", { class: "card" }, [
+      chartRow.appendChild(el("div", { class: "card card--tint card--tint-blue" }, [
         el("div", { class: "card__head" }, [
           el("div", {}, [
-            el("div", { class: "card__title", text: "OMs by status" }),
+            el("div", { class: "card__title", text: "Status distribution" }),
             el("div", {
               class: "card__subtitle",
-              text: sd.rows.length + " workflow states · grouped by lifecycle stage"
+              text: sd.rows.length + " workflow states · in lifecycle order"
             })
           ]),
           charts.viewToggle(statusChart)
@@ -285,12 +382,235 @@
       ]));
     }
 
-    /* ---- Overdue panel --------------------------------------------------
-       Sits below the two charts: those set the context (how many arrive,
-       where they sit in the workflow), and this is the follow-on detail —
-       how bad the backlog is and which OMs to pick up first. */
-    var od = state.omOverdue;
-    if (od) renderOverduePanel(slots.trend, od);
+    /* ---- Second row -------------------------------------------------- */
+    var chartRow2 = el("div", { class: "grid grid--halves", style: "margin-top:var(--space-8)" });
+    slots.trend.appendChild(chartRow2);
+
+    /* ---- Priority vs Status -------------------------------------------- */
+    var pm = state.omPriority;
+    if (pm && !pm.missing && pm.rows.length) {
+      var priorityChart = charts.responsive(function (width) {
+        return charts.stackedBarChart(pm.rows, {
+          width: width,
+          valueLabel: "OMs",
+          categoryLabel: "Priority",
+          title: "Priority vs status",
+          groups: pm.groups,
+          statuses: pm.statuses
+        });
+      });
+
+      chartRow2.appendChild(el("div", { class: "card card--tint card--tint-violet" }, [
+        el("div", { class: "card__head" }, [
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Priority vs status" }),
+            el("div", {
+              class: "card__subtitle",
+              text: Orbit.num(pm.total) + " OMs across " + pm.rows.length +
+                " priorities · stacked by status"
+            })
+          ]),
+          charts.viewToggle(priorityChart)
+        ]),
+        el("div", { class: "card__body" }, [priorityChart])
+      ]));
+    } else if (pm && pm.missing) {
+      chartRow2.appendChild(el("div", { class: "card card--pad" }, [
+        charts.emptyState(
+          "No priority field found",
+          "OM_Request_Form_Report has no field holding a priority value, so " +
+          "priority cannot be crossed against status. Check the console for " +
+          "the fields present, then set fields.priority in js/data.js."
+        )
+      ]));
+    }
+
+    /* ---- Ministry-wise volume ------------------------------------------
+       Each ministry takes its own colour from the categorical wheel. The
+       wheel index follows rank position and the bars are labelled with
+       their values, so colour marks identity rather than restating height. */
+    var mv = state.omMinistry;
+    if (mv && !mv.missing && mv.rows.length) {
+      /* Columns needed to stay legible: a narrow column carries fewer bars,
+         so the fold is recomputed per render width rather than fixed.
+         12 is also the categorical wheel's ceiling — past it a colour would
+         have to repeat, and two ministries sharing a hue is worse than a
+         fold that says how many it covers. */
+      var ministryChart = charts.responsive(function (width) {
+        var maxBars = width < 420 ? 5 : width < 560 ? 7 : width < 720 ? 9 : 12;
+        return charts.barChart(Orbit.foldTopN(mv.all, maxBars), {
+          colorful: true,
+          width: width,
+          height: 340,
+          rotateLabels: true,
+          valueLabel: "OMs",
+          categoryLabel: "Ministry",
+          title: "Ministry-wise volume",
+          tableRows: mv.all          /* table keeps every ministry */
+        });
+      });
+
+      var subtitle = Orbit.num(mv.total) + " OMs across " +
+        Orbit.num(mv.distinct) + " ministries · highest first";
+      if (mv.distinct > 5) {
+        subtitle += " · tail folded into Other, full list in the table view";
+      }
+
+      chartRow.appendChild(el("div", { class: "card card--tint card--tint-teal" }, [
+        el("div", { class: "card__head" }, [
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Ministry-wise volume" }),
+            el("div", { class: "card__subtitle", text: subtitle })
+          ]),
+          charts.viewToggle(ministryChart)
+        ]),
+        el("div", { class: "card__body" }, [ministryChart])
+      ]));
+    } else if (mv && mv.missing) {
+      chartRow.appendChild(el("div", { class: "card card--pad" }, [
+        charts.emptyState(
+          "No Ministry field found",
+          "OM_Request_Form_Report has no field named “Ministry”. Check the " +
+          "console for the fields present, then set fields.ministry in js/data.js."
+        )
+      ]));
+    }
+
+    /* ---- Department workload (bottleneck view) --------------------------
+       Horizontal bars: three department names read at full length, and the
+       list is short enough that every one gets its own colour. The bar is
+       total volume; the live count rides in the tooltip, because a big
+       total that is fully resolved is not a bottleneck. */
+    var dw = state.omDepartment;
+    if (dw && !dw.missing && dw.rows.length) {
+      var deptChart = charts.responsive(function (width) {
+        return charts.hBarChart(dw.rows, {
+          width: width,
+          rowH: 34,
+          valueLabel: "OMs",
+          categoryLabel: "Department",
+          title: "Department workload"
+        });
+      });
+
+      chartRow2.appendChild(el("div", { class: "card card--tint card--tint-amber" }, [
+        el("div", { class: "card__head" }, [
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Department workload" }),
+            el("div", {
+              class: "card__subtitle",
+              text: Orbit.num(dw.total) + " OMs by originating department · " +
+                Orbit.num(dw.totalOpen) + " still open"
+            })
+          ]),
+          charts.viewToggle(deptChart)
+        ]),
+        el("div", { class: "card__body" }, [deptChart])
+      ]));
+    } else if (dw && dw.missing) {
+      chartRow2.appendChild(el("div", { class: "card card--pad" }, [
+        charts.emptyState(
+          "No Originating_Department field found",
+          "OM_Request_Form_Report has no field holding the originating " +
+          "department. Check the console for the fields present, then set " +
+          "fields.department in js/data.js."
+        )
+      ]));
+    }
+
+    /* ---- Overdue OMs grid ----------------------------------------------
+       A list, not a chart: the question here is "which ones and who has
+       them", and no chart form answers that. Rows are most-overdue first,
+       which is the order someone works through them. */
+    if (od) renderOverdueGrid(slots.trend, od);
+
+    /* ---- Trend: OMs received vs closed ---------------------------------
+       One y-axis: both series are counts of OMs, so they share a scale
+       honestly. Two scales would manufacture a correlation that is not in
+       the data.
+
+       The two series are bucketed by DIFFERENT fields — received by the
+       report's date field, closed by the closure date — so the card names
+       both, and the window shrinks to 6 months on a narrow screen where 12
+       points would crowd. */
+    if (cl && s.series && s.series.length) {
+      var trendChart = charts.responsive(function (width) {
+        var months = width < 420 ? 6 : width < 620 ? 9 : 12;
+        var slice = function (points) { return points.slice(-months); };
+
+        return charts.lineChart([
+          { name: "Received", cat: 0, points: slice(s.series) },
+          { name: "Closed", cat: 7, points: slice(cl.series) }
+        ], {
+          width: width,
+          height: 300,
+          valueLabel: "OMs",
+          categoryLabel: "Month",
+          title: "OMs received vs closed"
+        });
+      });
+
+      var trendRow = el("div", {
+        class: "grid grid--fixed2", style: "margin-top:var(--space-8)"
+      });
+      slots.trend.appendChild(trendRow);
+
+      trendRow.appendChild(el("div", {
+        class: "card card--tint card--tint-blue"
+      }, [
+        el("div", { class: "card__head" }, [
+          el("div", {}, [
+            el("div", { class: "card__title", text: "Received vs closed" }),
+            el("div", {
+              class: "card__subtitle",
+              text: "By month · received by " + (s.dateField || "date") +
+                ", closed by " + (cl.dateField || "date")
+            })
+          ]),
+          charts.viewToggle(trendChart)
+        ]),
+        el("div", { class: "card__body" }, [trendChart])
+      ]));
+
+      /* ---- Send back / rejection analysis ------------------------------
+         Two bars rather than two pie slices: a 2-slice pie is a documented
+         anti-pattern — the eye compares lengths far better than wedge
+         angles, and with only two categories the ring wastes the space it
+         takes. Colours come from statusChartData, so Returned and Rejected
+         keep the exact hues they carry in the status donut. */
+      var sb = Orbit.sendBackAnalysis(statusData, Orbit.reports.omRequests);
+
+      if (!sb.missing) {
+        var sbChart = charts.responsive(function (width) {
+          return charts.hBarChart(sb.rows, {
+            width: width,
+            rowH: 64,
+            padL: Math.round(Math.min(110, Math.max(80, width * 0.24))),
+            valueLabel: "OMs",
+            categoryLabel: "Outcome",
+            title: "Send back and rejection"
+          });
+        });
+
+        trendRow.appendChild(el("div", {
+          class: "card card--tint card--tint-red card--center-body"
+        }, [
+          el("div", { class: "card__head" }, [
+            el("div", {}, [
+              el("div", { class: "card__title", text: "Sent back / rejected" }),
+              el("div", {
+                class: "card__subtitle",
+                text: Orbit.num(sb.total) + " of " + Orbit.num(sb.grandTotal) +
+                  " OMs went backwards · " + Orbit.pct(sb.share, 1) + " of all"
+              })
+            ]),
+            charts.viewToggle(sbChart)
+          ]),
+          el("div", { class: "card__body" }, [sbChart])
+        ]));
+      }
+    }
+
 
     /* ---- Data-quality notices ------------------------------------------ */
     if (!s.dateField) {
@@ -301,6 +621,23 @@
           "No date field recognised",
           "Every record counted into “All records”, but none could be placed in a month. " +
           "Open the browser console for the list of fields present, then set dateField in js/data.js."
+        )
+      ]));
+    }
+
+    /* Without a closure-date field the "Closed this month" figure silently
+       becomes "closed OMs that were DUE this month" — a different question
+       with a different answer. Never let that pass unannounced. */
+    if (cl && cl.usedFallbackField) {
+      slots.trend.appendChild(el("div", {
+        class: "mock-banner", style: "margin-top:var(--space-4)"
+      }, [
+        icon("alert", 14),
+        document.createTextNode(
+          "No closure-date field was found, so “Closed this month” counts " +
+          "closed OMs whose “" + (cl.dateField || "date") + "” falls in this " +
+          "month — not the month they were actually closed. Set " +
+          "closedDateField in js/data.js once the real field is known."
         )
       ]));
     }
@@ -375,18 +712,16 @@
   }
 
   /* ======================================================================
-     Overdue panel
+     Overdue OMs grid
      ====================================================================== */
 
-  var OVERDUE_LIST_SIZE = 8;
-
-  function renderOverduePanel(host, od) {
-    /* Nothing overdue is good news and gets a quiet, positive panel rather
-       than an alarming empty one. */
+  function renderOverdueGrid(host, od) {
     if (od.count === 0) {
-      host.appendChild(el("div", { class: "card card--pad overdue overdue--clear" }, [
+      host.appendChild(el("div", {
+        class: "card card--pad", style: "margin-top:var(--space-8)"
+      }, [
         el("div", { class: "row row--3" }, [
-          el("span", { class: "overdue__badge overdue__badge--clear" }, [icon("check", 18)]),
+          el("span", { class: "grid-badge grid-badge--clear" }, [icon("check", 18)]),
           el("div", {}, [
             el("div", { class: "card__title", text: "Nothing overdue" }),
             el("div", {
@@ -400,90 +735,64 @@
       return;
     }
 
-    var shown = od.items.slice(0, OVERDUE_LIST_SIZE);
-    var remaining = od.count - shown.length;
-
-    /* Ageing distribution. Part-to-whole across four ordered bands, so a
-       donut is a legitimate form here — and the hole carries the total. */
-    var ageChart = charts.responsive(function (width) {
-      return charts.donutChart(od.buckets, {
-        size: Math.max(180, Math.min(240, width - 40)),
-        valueLabel: "OMs",
-        categoryLabel: "Days past due",
-        centerLabel: "overdue",
-        title: "Overdue by age"
-      });
-    });
-
-    /* The work list */
-    var list = el("div", { class: "table-wrap" }, [
-      el("table", { class: "table" }, [
-        el("thead", {}, [
-          el("tr", {}, [
-            el("th", { text: "OM" }),
-            el("th", { text: "Subject" }),
-            el("th", { text: "Due" }),
-            el("th", { class: "table__num", text: "Days late" }),
-            el("th", { text: "Status" })
-          ])
+    var body = el("tbody", {}, od.items.map(function (item) {
+      return el("tr", {}, [
+        el("td", { "data-label": "Reference No.", class: "table__strong", text: item.reference }),
+        el("td", { "data-label": "Title", text: item.subject }),
+        el("td", { "data-label": "Ministry", text: item.ministry }),
+        el("td", { "data-label": "Current Assignee" }, [
+          item.assignee === "Unassigned"
+            ? el("span", { class: "badge badge--warning", text: "Unassigned" })
+            : document.createTextNode(item.assignee)
         ]),
-        el("tbody", {}, shown.map(function (item) {
-          return el("tr", {}, [
-            el("td", { "data-label": "OM", class: "table__strong", text: item.number }),
-            el("td", { "data-label": "Subject", text: item.subject }),
-            el("td", { "data-label": "Due", class: "table__muted", text: Orbit.fmtDate(item.due) }),
-            el("td", { "data-label": "Days late", class: "table__num" }, [
-              el("span", {
-                class: "age-pill",
-                title: item.band + " past due"
-              }, [
-                el("span", { class: "age-pill__dot", style: "background:" + item.ramp }),
-                document.createTextNode(Orbit.num(item.daysLate))
-              ])
-            ]),
-            el("td", { "data-label": "Status" }, [
-              el("span", { class: "badge badge--neutral", text: item.status })
-            ])
-          ]);
-        }))
-      ])
-    ]);
+        el("td", { "data-label": "Due Date", class: "table__muted", text: Orbit.fmtDate(item.due) }),
+        el("td", { "data-label": "Days Overdue", class: "table__num" }, [
+          el("span", { class: "age-pill", title: item.band + " past due" }, [
+            el("span", { class: "age-pill__dot", style: "background:" + item.ramp }),
+            document.createTextNode(Orbit.num(item.daysLate))
+          ])
+        ])
+      ]);
+    }));
 
-    host.appendChild(el("div", { class: "card overdue" }, [
+    var unassigned = od.items.filter(function (i) {
+      return i.assignee === "Unassigned";
+    }).length;
+
+    host.appendChild(el("div", {
+      class: "card card--tint card--tint-red overdue-grid", style: "margin-top:var(--space-8)"
+    }, [
       el("div", { class: "card__head" }, [
         el("div", { class: "row row--3" }, [
-          el("span", { class: "overdue__badge" }, [icon("alert", 18)]),
+          el("span", { class: "grid-badge" }, [icon("alert", 18)]),
           el("div", {}, [
             el("div", { class: "card__title", text: "Overdue OMs" }),
             el("div", {
               class: "card__subtitle",
-              text: "Past the due date and not Closed, as of " + Orbit.fmtDate(od.asOf)
+              text: Orbit.num(od.count) + " past their due date and not Closed · " +
+                "oldest " + Orbit.num(od.oldestDays) + " days · as of " +
+                Orbit.fmtDate(od.asOf) +
+                (unassigned ? " · " + Orbit.num(unassigned) + " unassigned" : "")
             })
-          ])
-        ]),
-        el("div", { class: "overdue__figures" }, [
-          el("div", { class: "overdue__count", text: Orbit.num(od.count) }),
-          el("div", { class: "overdue__aside" }, [
-            el("div", { text: "oldest " + Orbit.num(od.oldestDays) + " days" }),
-            el("div", { class: "text-muted", text: "average " + Orbit.num(od.averageDaysLate) + " days" })
           ])
         ])
       ]),
-
-      el("div", { class: "card__body" }, [
-        el("div", { class: "grid grid--halves" }, [
-          el("div", { class: "overdue__pane" }, [
-            el("div", { class: "overdue__section-title", text: "How late" }),
-            ageChart
-          ]),
-          el("div", { class: "stack stack--3" }, [
-            el("div", { class: "row row--between" }, [
-              el("div", { class: "overdue__section-title", text: "Most overdue" }),
-              remaining > 0
-                ? el("span", { class: "text-xs text-muted", text: "+" + Orbit.num(remaining) + " more" })
-                : null
+      /* The grid scrolls inside the card rather than stretching the page —
+         with a few hundred rows the page would otherwise be unusable. */
+      el("div", { class: "card__body card__body--flush" }, [
+        el("div", { class: "table-wrap overdue-grid__scroll" }, [
+          el("table", { class: "table" }, [
+            el("thead", {}, [
+              el("tr", {}, [
+                el("th", { text: "Reference No." }),
+                el("th", { text: "Title" }),
+                el("th", { text: "Ministry" }),
+                el("th", { text: "Current Assignee" }),
+                el("th", { text: "Due Date" }),
+                el("th", { class: "table__num", text: "Days Overdue" })
+              ])
             ]),
-            list
+            body
           ])
         ])
       ])
@@ -500,7 +809,11 @@
     return el("span", { class: "delta delta--" + d.dir }, [
       el("span", { "aria-hidden": "true", text: glyph }),
       document.createTextNode(text),
-      el("span", { class: "text-muted", style: "font-weight:400", text: " " + suffix })
+      /* Skip the trailing period label when there is none — an empty span
+         still renders a stray space inside a chip. */
+      suffix
+        ? el("span", { class: "text-muted", style: "font-weight:400", text: " " + suffix })
+        : null
     ]);
   }
 
@@ -565,11 +878,6 @@
         group: "Actions", label: "Refresh data", icon: "refresh", hint: "",
         run: function () { loadOM(true); }
       });
-      list.push({
-        group: "Actions", label: "Toggle dark mode", icon: "moon", hint: "",
-        run: function () { Orbit.theme.toggle(); syncThemeIcon(); }
-      });
-
       return list;
     },
 
@@ -640,18 +948,6 @@
     }, 3200);
   };
 
-  /* ---- Theme icon ------------------------------------------------------- */
-
-  function syncThemeIcon() {
-    var mode = Orbit.theme.get();
-    var isDark = mode === "dark" ||
-      (mode === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    var btn = $("#themeToggle");
-    Orbit.clear(btn);
-    btn.appendChild(icon(isDark ? "sun" : "moon"));
-    btn.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
-  }
-
   /* ======================================================================
      Events
      ====================================================================== */
@@ -659,11 +955,6 @@
   function wireEvents() {
     window.addEventListener("hashchange", function () {
       activate((location.hash || "").replace("#", ""));
-    });
-
-    $("#themeToggle").addEventListener("click", function () {
-      Orbit.theme.toggle();
-      syncThemeIcon();
     });
 
     $("#omniTrigger").addEventListener("click", omni.open);
@@ -686,11 +977,6 @@
       else if (e.key === "ArrowUp") { e.preventDefault(); omni.move(-1); }
       else if (e.key === "Enter") { e.preventDefault(); omni.activate(); }
     });
-
-    /* Repaint on theme change so the SVG marks pick up the new tokens */
-    document.addEventListener("orbit:themechange", function () {
-      if (state.omSummary) paintOM($("#view"));
-    });
   }
 
   /* ======================================================================
@@ -708,8 +994,6 @@
   }
 
   function boot() {
-    Orbit.theme.init();
-    syncThemeIcon();
     buildShell();
     wireEvents();
 

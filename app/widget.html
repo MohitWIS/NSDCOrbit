@@ -13,17 +13,6 @@
   <link rel="stylesheet" href="css/charts.css">
 
   <script src="https://js.zohostatic.com/creator/widgets/version/2.0/widgetsdk-min.js"></script>
-
-  <script>
-    /* Apply the stored theme before first paint so dark mode never flashes
-       white. Kept inline and tiny on purpose. */
-    (function () {
-      try {
-        var mode = localStorage.getItem("orbit.theme");
-        if (mode && mode !== "auto") document.documentElement.setAttribute("data-theme", mode);
-      } catch (e) { /* storage blocked — fall back to the OS preference */ }
-    })();
-  </script>
 </head>
 
 <body>
@@ -59,8 +48,6 @@
             <span class="omni-trigger__label">Search or jump to…</span>
             <span class="kbd">Ctrl K</span>
           </button>
-
-          <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle theme"></button>
         </div>
       </header>
 

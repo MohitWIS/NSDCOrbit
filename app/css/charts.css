@@ -187,23 +187,46 @@
 .s5-fill { fill: var(--series-5); } .s5-stroke { stroke: var(--series-5); }
 .s6-fill { fill: var(--series-6); } .s6-stroke { stroke: var(--series-6); }
 
+/* Categorical wheel — one colour per category. Order is load-bearing:
+   it was validated on the adjacent pairlist. */
+.c1-fill { fill: var(--cat-1); }   .c2-fill { fill: var(--cat-2); }
+.c3-fill { fill: var(--cat-3); }   .c4-fill { fill: var(--cat-4); }
+.c5-fill { fill: var(--cat-5); }   .c6-fill { fill: var(--cat-6); }
+.c7-fill { fill: var(--cat-7); }   .c8-fill { fill: var(--cat-8); }
+.c9-fill { fill: var(--cat-9); }   .c10-fill { fill: var(--cat-10); }
+.c11-fill { fill: var(--cat-11); } .c12-fill { fill: var(--cat-12); }
+
 /* ---- Donut -------------------------------------------------------------- */
 
-/* Centred on both axes, so the ring sits in the middle of its column
-   regardless of how tall the sibling column grows. */
+/* Ring on the left, scale legend on the right. `flex-wrap` means the pair
+   stacks by itself once the card is too narrow to hold both — no media
+   query needed, and it responds to the CARD's width rather than the
+   viewport's, which is what actually matters in a two-column grid. */
 .chart--donut {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: var(--space-4);
+  gap: var(--space-5);
+  flex-wrap: wrap;
   height: 100%;
 }
 
 .chart--donut .chart__svg {
   width: auto;
   max-width: 100%;
-  margin-inline: auto;
+  flex: 0 0 auto;
+}
+
+/* The legend takes the remaining width, down to a floor that still fits a
+   status name plus its count and share. */
+.chart--donut .legend--stack {
+  flex: 1 1 200px;
+  /* The base rule sets width:100%, which would claim the whole row and
+     push the ring onto its own line. */
+  width: auto;
+  max-width: 320px;
+  margin: 0;
 }
 
 /* Segments sweep in on first paint */
@@ -242,11 +265,19 @@
 
 .legend__item.is-muted { opacity: 0.45; }
 
+/* The swatch carries the same two-step gradient as its mark, so legend and
+   chart read as the same object. `--sw` is set inline to the mark's colour. */
 .legend__swatch {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 3px;
   flex-shrink: 0;
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, currentColor 0%, transparent),
+    rgba(255, 255, 255, 0.45)
+  );
+  box-shadow: inset 0 0 0 1px rgba(13, 18, 32, 0.10);
 }
 
 .legend__value {
@@ -311,8 +342,6 @@
   border-block-end: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-:root[data-theme="dark"] .chart-tip__title { border-color: rgba(0, 0, 0, 0.18); }
-
 .chart-tip__row {
   display: flex;
   align-items: center;
@@ -356,7 +385,7 @@
 
 .spark { display: block; width: 100%; height: 100%; overflow: visible; }
 .spark__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.spark__area { stroke: none; opacity: 0.16; }
+.spark__area { stroke: none; }
 .spark__end { stroke: var(--surface-1); stroke-width: 2; }
 
 /* ---- Progress / meter --------------------------------------------------- */

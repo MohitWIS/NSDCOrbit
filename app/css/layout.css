@@ -13,7 +13,8 @@
   flex-direction: column;
 }
 
-/* Ambient brand glow — the "orbit" motif. Purely decorative, sits behind all. */
+/* Ambient brand glow — the "orbit" motif. Purely decorative, sits behind all
+   and never behind a chart: charts live on white cards above this layer. */
 .app::before {
   content: "";
   position: fixed;
@@ -21,16 +22,35 @@
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(60rem 40rem at 12% -10%, rgba(0, 138, 210, 0.10), transparent 60%),
-    radial-gradient(50rem 36rem at 100% 0%, rgba(174, 201, 10, 0.08), transparent 55%),
-    radial-gradient(48rem 34rem at 60% 110%, rgba(215, 53, 37, 0.06), transparent 55%);
+    radial-gradient(58rem 38rem at 8% -12%, rgba(0, 138, 210, 0.20), transparent 62%),
+    radial-gradient(52rem 36rem at 100% -4%, rgba(174, 201, 10, 0.17), transparent 58%),
+    radial-gradient(46rem 34rem at 88% 108%, rgba(215, 53, 37, 0.13), transparent 58%),
+    radial-gradient(44rem 32rem at 24% 104%, rgba(81, 183, 72, 0.12), transparent 58%);
 }
 
 /* The tri-colour NSDC bar, kept from the original dashboard. */
 .brandbar {
-  height: 3px;
+  height: 4px;
   flex-shrink: 0;
   background: var(--brand-bar);
+}
+
+/* Section headings carry a small brand tick, so the page has colour even
+   where there is no chart. */
+.section__title {
+  position: relative;
+  padding-inline-start: var(--space-3);
+}
+
+.section__title::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.15em;
+  bottom: 0.15em;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(var(--brand-blue), var(--brand-lime));
 }
 
 /* ==========================================================================
@@ -94,7 +114,9 @@
 
 .brand__org {
   font-size: var(--text-2xs);
-  color: var(--ink-muted);
+  /* Sits on the translucent topbar over a tinted page, where muted ink
+     falls to ~3:1. Secondary keeps it readable. */
+  color: var(--ink-secondary);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   font-weight: var(--weight-semibold);
@@ -118,7 +140,7 @@
 
 .topbar__crumb {
   font-size: var(--text-xs);
-  color: var(--ink-muted);
+  color: var(--ink-secondary);
 }
 
 .topbar__actions {
@@ -217,7 +239,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--line-hairline);
   background: var(--surface-1);
-  color: var(--ink-muted);
+  color: var(--ink-secondary);
   font-size: var(--text-sm);
   transition: border-color var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out);
@@ -238,7 +260,7 @@
   border-radius: var(--radius-xs);
   border: 1px solid var(--line-hairline);
   background: var(--surface-2);
-  color: var(--ink-muted);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-2xs);
   font-weight: var(--weight-semibold);
@@ -302,6 +324,15 @@
 .grid--kpi { grid-template-columns: repeat(auto-fit, minmax(min(215px, 100%), 1fr)); }
 .grid--wide { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
 .grid--halves { grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); }
+
+/* A FIXED two-column grid. --halves uses auto-fit, which collapses the
+   empty track and lets a lone child stretch across the whole row; this one
+   keeps a single child at half width, with the other column left empty. */
+.grid--fixed2 { grid-template-columns: repeat(2, 1fr); }
+
+@media (max-width: 900px) {
+  .grid--fixed2 { grid-template-columns: 1fr; }
+}
 
 .span-2 { grid-column: span 2; }
 @media (max-width: 900px) { .span-2 { grid-column: span 1; } }

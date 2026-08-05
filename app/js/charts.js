@@ -56,6 +56,105 @@
   }
 
   /* ======================================================================
+     Paint: gradients and depth
+
+     Every gradient runs between two steps of the SAME colour, so it is
+     decoration and never an encoding — a mark's hue still identifies its
+     series or group exactly as the flat fill did. Gradient ids are unique
+     per chart instance, because duplicate ids across SVGs in one document
+     make later charts inherit the first one's paint.
+     ====================================================================== */
+
+  var paintSeq = 0;
+
+  function ensureDefs(svg) {
+    var defs = svg.querySelector("defs");
+    if (!defs) {
+      defs = svgEl("defs");
+      svg.insertBefore(defs, svg.firstChild);
+    }
+    return defs;
+  }
+
+  /**
+   * A two-stop gradient of one colour.
+   * @param {string} dir "v" top→bottom, "h" left→right, "d" diagonal
+   */
+  function paint(svg, color, dir) {
+    var defs = ensureDefs(svg);
+    var id = "orbit-g" + (++paintSeq);
+
+    var coords = dir === "h"
+      ? { x1: "0", y1: "0", x2: "1", y2: "0" }
+      : dir === "d"
+        ? { x1: "0", y1: "0", x2: "1", y2: "1" }
+        : { x1: "0", y1: "0", x2: "0", y2: "1" };
+
+    var grad = svgEl("linearGradient", {
+      id: id, x1: coords.x1, y1: coords.y1, x2: coords.x2, y2: coords.y2
+    });
+
+    /* Vertical bars are lightest at the top and solid at the baseline, so
+       they read as standing on the axis. Horizontal bars run the other way,
+       solid at the baseline and lifting towards the data end. */
+    var light = "color-mix(in srgb, " + color + " 74%, white)";
+    var stops = (dir === "h")
+      ? [color, light]
+      : (dir === "d") ? [light, color] : [light, color];
+
+    grad.appendChild(svgEl("stop", { offset: "0%", style: "stop-color:" + stops[0] }));
+    grad.appendChild(svgEl("stop", { offset: "100%", style: "stop-color:" + stops[1] }));
+    defs.appendChild(grad);
+
+    return "url(#" + id + ")";
+  }
+
+  /** Soft drop shadow, so marks sit above the card rather than on it. */
+  function softShadow(svg) {
+    var defs = ensureDefs(svg);
+    var id = "orbit-s" + (++paintSeq);
+    var filter = svgEl("filter", {
+      id: id, x: "-20%", y: "-20%", width: "140%", height: "140%"
+    });
+    filter.appendChild(svgEl("feDropShadow", {
+      dx: "0", dy: "1", stdDeviation: "1.6",
+      "flood-color": "#0d1220", "flood-opacity": "0.18"
+    }));
+    defs.appendChild(filter);
+    return "url(#" + id + ")";
+  }
+
+  /** The CSS colour expression behind a series slot number. */
+  function slotColor(slot) {
+    return "var(--series-" + (slot || 1) + ")";
+  }
+
+  /** The categorical wheel: one colour per category, 12 slots, no cycling. */
+  var CAT_SLOTS = 12;
+
+  function catColor(index) {
+    return "var(--cat-" + ((index % CAT_SLOTS) + 1) + ")";
+  }
+
+  /**
+   * Resolve a datum's paint colour.
+   *   d.ramp   — an explicit ordered-scale colour (age bands)
+   *   d.cat    — a categorical wheel index (0-based)
+   *   opts.colorful — colour every category by its position
+   *   otherwise the chart's single series slot
+   */
+  function colorFor(d, i, opts, slot) {
+    if (d && d.ramp) return d.ramp;
+    /* A residual bucket is not a category — give it neutral grey so it
+       never consumes a wheel slot, and so a 13th item cannot wrap round
+       and repeat the first category's colour. */
+    if (d && d.isOther) return "var(--cat-other)";
+    if (d && typeof d.cat === "number") return catColor(d.cat);
+    if (opts && opts.colorful) return catColor(i);
+    return slotColor(slot);
+  }
+
+  /* ======================================================================
      Tooltip
      ====================================================================== */
 
@@ -111,7 +210,13 @@
     var values = points.map(function (p) { return p.value; });
     var max = Math.max.apply(null, values);
     var min = Math.min.apply(null, values);
-    var range = max - min || 1;
+
+    /* A series with no variation has no trend to draw. Rendering it anyway
+       produces a flat rule pinned to one edge, which reads as a stray line
+       rather than data — and an all-zero series is the common case. */
+    if (max === min) return svg;
+
+    var range = max - min;
     var stepX = (w - pad * 2) / (points.length - 1);
 
     var coords = points.map(function (p, i) {
@@ -128,7 +233,22 @@
     var area = line + " L" + coords[coords.length - 1].x.toFixed(2) + "," + h +
       " L" + coords[0].x.toFixed(2) + "," + h + " Z";
 
-    svg.appendChild(svgEl("path", { class: "spark__area s" + slot + "-fill", d: area }));
+    /* The area fades to nothing at the bottom, so the tile's figures are
+       never read against a solid block. */
+    var defs = ensureDefs(svg);
+    var gid = "orbit-sp" + (++paintSeq);
+    var grad = svgEl("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
+    grad.appendChild(svgEl("stop", {
+      offset: "0%", style: "stop-color:" + slotColor(slot) + ";stop-opacity:0.42"
+    }));
+    grad.appendChild(svgEl("stop", {
+      offset: "100%", style: "stop-color:" + slotColor(slot) + ";stop-opacity:0"
+    }));
+    defs.appendChild(grad);
+
+    svg.appendChild(svgEl("path", {
+      class: "spark__area", fill: "url(#" + gid + ")", d: area
+    }));
     svg.appendChild(svgEl("path", { class: "spark__line s" + slot + "-stroke", d: line }));
 
     /* Mark only the latest point — one label, not twelve. */
@@ -166,7 +286,11 @@
     /* Geometry. The bottom band is reserved for x-axis labels so they are
        never clipped by the container height. */
     var W = opts.width || 760, H = height;
-    var padL = 44, padR = 12, padT = 18, padB = 34;
+    /* Rotated labels need a deeper band beneath the plot. Sizing the
+       container to include it is what stops the axis being clipped and the
+       card growing a tiny nested scrollbar. */
+    var padL = 44, padR = 12, padT = 18;
+    var padB = opts.padB || (opts.rotateLabels ? 76 : 34);
     var plotW = W - padL - padR;
     var plotH = H - padT - padB;
 
@@ -212,8 +336,19 @@
     var tooltip = makeTooltip(host);
 
     /* --- Bars ------------------------------------------------------------ */
-    /* One series → one colour for every bar. Never darker-where-bigger:
-       that would double-encode height as hue. */
+    /* One series → one colour for every bar. The gradient runs between two
+       steps of that same colour, so it adds depth without implying that a
+       taller bar is a different category. Never darker-where-bigger: that
+       would double-encode height as hue. */
+    /* One gradient per distinct colour, built once and reused. */
+    var barShadow = softShadow(svg);
+    var fillCache = {};
+    function fillFor(d, i) {
+      var color = colorFor(d, i, opts, slot);
+      if (!fillCache[color]) fillCache[color] = paint(svg, color, "v");
+      return fillCache[color];
+    }
+
     var maxIndex = data.reduce(function (best, d, i) {
       return d.value > data[best].value ? i : best;
     }, 0);
@@ -224,7 +359,9 @@
       var y = padT + plotH - barH;
 
       var path = svgEl("path", {
-        class: "chart__bar s" + slot + "-fill",
+        class: "chart__bar",
+        fill: fillFor(d, i),
+        filter: barShadow,
         d: barPath(x, y, barW, barH),
         style: "animation-delay:" + (i * 28) + "ms"
       });
@@ -238,7 +375,7 @@
         width: slotW, height: plotH,
         tabindex: "0",
         role: "button",
-        "aria-label": d.label + ": " + Orbit.num(d.value) + " " + valueLabel
+        "aria-label": (d.full || d.label) + ": " + Orbit.num(d.value) + " " + valueLabel
       });
 
       function enter() {
@@ -249,11 +386,13 @@
         tooltip.show(
           (x + barW / 2) * scale,
           Math.max(y * scale, 8),
-          d.label,
+          /* The tooltip carries the FULL name — the axis label may be
+             shortened to fit, and a truncated name is not identification. */
+          d.full || d.label,
           [{
             label: valueLabel,
             value: Orbit.num(d.value),
-            color: "var(--series-" + slot + ")"
+            color: colorFor(d, i, opts, slot)
           }]
         );
       }
@@ -282,25 +421,304 @@
         }));
       }
 
-      /* --- X labels: thin out when crowded rather than overlapping ------- */
-      var every = slotW < 34 ? Math.ceil(34 / slotW) : 1;
-      if (i % every === 0 || isLast) {
+      /* --- X labels ------------------------------------------------------
+         Rotated labels never overlap, so every category can be named. Flat
+         labels are thinned out when the slots get narrow, which is better
+         than letting them collide. */
+      var labelX = padL + i * slotW + slotW / 2;
+      var labelY = padT + plotH + 18;
+
+      if (opts.rotateLabels) {
         svg.appendChild(svgEl("text", {
           class: "chart__tick",
-          x: (padL + i * slotW + slotW / 2).toFixed(1),
-          y: padT + plotH + 18,
-          "text-anchor": "middle",
+          x: labelX.toFixed(1),
+          y: labelY,
+          "text-anchor": "end",
+          transform: "rotate(-38 " + labelX.toFixed(1) + " " + labelY + ")",
           text: d.label
         }));
+      } else {
+        var every = slotW < 34 ? Math.ceil(34 / slotW) : 1;
+        if (i % every === 0 || isLast) {
+          svg.appendChild(svgEl("text", {
+            class: "chart__tick",
+            x: labelX.toFixed(1),
+            y: labelY,
+            "text-anchor": "middle",
+            text: d.label
+          }));
+        }
       }
     });
 
     host.appendChild(svg);
 
-    /* --- Table view twin — the WCAG-clean equivalent --------------------- */
-    host.appendChild(tableTwin(data, opts.categoryLabel || "Period", valueLabel));
+    /* --- Table view twin — the WCAG-clean equivalent ---------------------
+       `tableRows` lets the table carry the complete set when the chart
+       itself is capped (top-N plus "Other"), so nothing is only ever
+       visible as a fold. */
+    host.appendChild(tableTwin(
+      opts.tableRows || data, opts.categoryLabel || "Period", valueLabel));
 
     return host;
+  }
+
+  /* ======================================================================
+     Line chart — change over time, two or more series
+
+     One y-axis only. Both series here are counts of OMs, so they share a
+     scale honestly; two scales would invent a correlation that is not in
+     the data. No area fill: with series overlapping, two translucent areas
+     blend into a third colour that means nothing.
+     ====================================================================== */
+
+  /**
+   * @param {Array<{name, points:[{label,value}], cat}>} series
+   * @param {Object} opts { width, height, valueLabel, categoryLabel, title }
+   */
+  function lineChart(series, opts) {
+    opts = opts || {};
+    var categoryLabel = opts.categoryLabel || "Period";
+    var valueLabel = opts.valueLabel || "Count";
+
+    var host = el("div", { class: "chart chart--animate" });
+
+    var live = (series || []).filter(function (s) {
+      return s.points && s.points.length > 1;
+    });
+
+    if (!live.length) {
+      host.appendChild(emptyState("Nothing to plot"));
+      return host;
+    }
+
+    var W = opts.width || 760;
+    var H = opts.height || 300;
+    var padL = 44, padR = 18, padT = 20, padB = 34;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+
+    var count = live[0].points.length;
+
+    /* One shared maximum across every series — the whole point of a single
+       axis is that the lines are comparable. */
+    var peak = 0;
+    live.forEach(function (s) {
+      s.points.forEach(function (p) { if (p.value > peak) peak = p.value; });
+    });
+    var yMax = niceMax(peak || 1);
+    var yTicks = ticks(yMax, 4);
+
+    var stepX = count > 1 ? plotW / (count - 1) : 0;
+    var xAt = function (i) { return padL + i * stepX; };
+    var yAt = function (v) { return padT + plotH * (1 - v / yMax); };
+
+    var svg = svgEl("svg", {
+      class: "chart__svg",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": (opts.title || valueLabel) + " — line chart, " +
+        live.length + " series over " + count + " periods. The same values " +
+        "are available in the table view."
+    });
+
+    /* --- Grid: solid hairlines ------------------------------------------ */
+    yTicks.forEach(function (t) {
+      var y = yAt(t);
+      svg.appendChild(svgEl("line", {
+        class: "chart__grid-line",
+        x1: padL, x2: W - padR, y1: y.toFixed(1), y2: y.toFixed(1)
+      }));
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick", x: padL - 8, y: (y + 3.5).toFixed(1),
+        "text-anchor": "end", text: Orbit.compact(t)
+      }));
+    });
+
+    svg.appendChild(svgEl("line", {
+      class: "chart__axis-line",
+      x1: padL, x2: W - padR, y1: padT + plotH, y2: padT + plotH
+    }));
+
+    /* --- X labels: thinned when crowded, never overlapping --------------- */
+    var every = stepX < 46 ? Math.ceil(46 / Math.max(stepX, 1)) : 1;
+    live[0].points.forEach(function (p, i) {
+      if (i % every !== 0 && i !== count - 1) return;
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick", x: xAt(i).toFixed(1), y: padT + plotH + 18,
+        "text-anchor": "middle", text: p.label
+      }));
+    });
+
+    /* --- Crosshair, drawn under the marks -------------------------------- */
+    var crosshair = svgEl("line", {
+      class: "chart__crosshair", x1: 0, x2: 0, y1: padT, y2: padT + plotH,
+      style: "opacity:0"
+    });
+    svg.appendChild(crosshair);
+
+    /* --- Lines ------------------------------------------------------------ */
+    var dots = [];
+
+    live.forEach(function (s, si) {
+      var color = typeof s.cat === "number" ? catColor(s.cat) : slotColor(si + 1);
+
+      var d = s.points.map(function (p, i) {
+        return (i ? "L" : "M") + xAt(i).toFixed(2) + "," + yAt(p.value).toFixed(2);
+      }).join(" ");
+
+      /* The draw-on animation needs the path's real length; guessing it
+         leaves the line either half-drawn or snapping in. */
+      var len = 0;
+      for (var i = 1; i < s.points.length; i++) {
+        var dx = stepX;
+        var dy = yAt(s.points[i].value) - yAt(s.points[i - 1].value);
+        len += Math.sqrt(dx * dx + dy * dy);
+      }
+
+      svg.appendChild(svgEl("path", {
+        class: "chart__line", d: d, stroke: color,
+        style: "--path-len:" + Math.ceil(len) + ";animation-delay:" + (si * 160) + "ms"
+      }));
+
+      var seriesDots = s.points.map(function (p, i) {
+        var dot = svgEl("circle", {
+          class: "chart__dot", cx: xAt(i).toFixed(2), cy: yAt(p.value).toFixed(2),
+          r: 3.5, fill: color
+        });
+        svg.appendChild(dot);
+        return dot;
+      });
+      dots.push(seriesDots);
+
+      /* Direct-label the endpoint only — one label per series, not one per
+         point. */
+      var last = s.points[count - 1];
+      svg.appendChild(svgEl("text", {
+        class: "chart__label",
+        x: (xAt(count - 1) + 6).toFixed(1),
+        y: (yAt(last.value) - 8).toFixed(1),
+        "text-anchor": "end",
+        text: Orbit.num(last.value)
+      }));
+    });
+
+    /* --- Hover: one band per period, the full plot height ---------------- */
+    var tooltip = makeTooltip(host);
+
+    live[0].points.forEach(function (p, i) {
+      var bandW = count > 1 ? stepX : plotW;
+      var band = svgEl("rect", {
+        class: "chart__bar-hit",
+        x: (xAt(i) - bandW / 2).toFixed(2), y: padT,
+        width: bandW.toFixed(2), height: plotH,
+        tabindex: "0", role: "button",
+        "aria-label": p.label + ": " + live.map(function (s) {
+          return s.name + " " + Orbit.num(s.points[i].value);
+        }).join(", ")
+      });
+
+      function enter() {
+        crosshair.setAttribute("x1", xAt(i).toFixed(2));
+        crosshair.setAttribute("x2", xAt(i).toFixed(2));
+        crosshair.setAttribute("style", "opacity:1");
+        dots.forEach(function (set) {
+          set.forEach(function (dot, di) {
+            dot.setAttribute("r", di === i ? 5.5 : 3.5);
+          });
+        });
+
+        var rect = host.getBoundingClientRect();
+        var scale = (rect.width || W) / W;
+        var topY = Math.min.apply(null, live.map(function (s) {
+          return yAt(s.points[i].value);
+        }));
+
+        tooltip.show(xAt(i) * scale, Math.max(topY * scale, 8), p.label,
+          live.map(function (s, si) {
+            return {
+              label: s.name,
+              value: Orbit.num(s.points[i].value),
+              color: typeof s.cat === "number" ? catColor(s.cat) : slotColor(si + 1)
+            };
+          }));
+      }
+
+      function leave() {
+        crosshair.setAttribute("style", "opacity:0");
+        dots.forEach(function (set) {
+          set.forEach(function (dot) { dot.setAttribute("r", 3.5); });
+        });
+        tooltip.hide();
+      }
+
+      band.addEventListener("mouseenter", enter);
+      band.addEventListener("mouseleave", leave);
+      band.addEventListener("focus", enter);
+      band.addEventListener("blur", leave);
+      svg.appendChild(band);
+    });
+
+    host.appendChild(svg);
+
+    /* --- Legend: always present for two or more series ------------------- */
+    var legend = el("div", { class: "legend" });
+    live.forEach(function (s, si) {
+      var total = s.points.reduce(function (sum, p) { return sum + p.value; }, 0);
+      legend.appendChild(el("span", { class: "legend__item" }, [
+        el("span", {
+          class: "legend__swatch",
+          style: "background:" + (typeof s.cat === "number" ? catColor(s.cat) : slotColor(si + 1))
+        }),
+        document.createTextNode(s.name),
+        el("span", { class: "legend__value", text: Orbit.num(total) })
+      ]));
+    });
+    host.appendChild(legend);
+
+    host.appendChild(seriesTableTwin(live, categoryLabel));
+
+    return host;
+  }
+
+  /** One row per period, one column per series. */
+  function seriesTableTwin(series, categoryLabel) {
+    var labels = series[0].points.map(function (p) { return p.label; });
+
+    return el("div", { class: "chart-tableview" }, [
+      el("div", { class: "table-wrap" }, [
+        el("table", { class: "table" }, [
+          el("thead", {}, [
+            el("tr", {}, [el("th", { text: categoryLabel })].concat(
+              series.map(function (s) {
+                return el("th", { class: "table__num", text: s.name });
+              })
+            ))
+          ]),
+          el("tbody", {}, labels.map(function (label, i) {
+            return el("tr", {}, [
+              el("td", { "data-label": categoryLabel, text: label })
+            ].concat(series.map(function (s) {
+              return el("td", {
+                class: "table__num", "data-label": s.name,
+                text: Orbit.num(s.points[i].value)
+              });
+            })));
+          })),
+          el("tfoot", {}, [
+            el("tr", {}, [
+              el("td", { class: "table__strong", "data-label": "Total", text: "Total" })
+            ].concat(series.map(function (s) {
+              return el("td", {
+                class: "table__num table__strong", "data-label": s.name,
+                text: Orbit.num(s.points.reduce(function (a, p) { return a + p.value; }, 0))
+              });
+            })))
+          ])
+        ])
+      ])
+    ]);
   }
 
   /* ======================================================================
@@ -380,6 +798,7 @@
     });
 
     var tooltip = makeTooltip(host);
+    var arcShadow = softShadow(svg);
     var angle = 0;
 
     /* Smallest sweep that still reads as a sliver on screen. */
@@ -404,12 +823,13 @@
 
       angle += sweep;
 
-      var fill = d.ramp || "var(--series-" + (d.slot || (i + 1)) + ")";
+      var fill = colorFor(d, i, opts, d.slot || (i + 1));
 
       var seg = svgEl("path", {
         class: "chart__arc",
         d: arcPath(cx, cy, rOuter, rInner, start, end),
-        fill: fill,
+        fill: paint(svg, fill, "d"),
+        filter: arcShadow,
         tabindex: "0",
         role: "button",
         "aria-label": d.label + ": " + Orbit.num(d.value) + " " + valueLabel +
@@ -457,7 +877,7 @@
        values so nothing depends on reading the wedges. */
     var legend = el("div", { class: "legend legend--stack" });
     (data || []).forEach(function (d, i) {
-      var fill = d.ramp || "var(--series-" + (d.slot || (i + 1)) + ")";
+      var fill = colorFor(d, i, opts, d.slot || (i + 1));
       legend.appendChild(el("span", {
         class: "legend__item" + (d.value === 0 ? " is-muted" : "")
       }, [
@@ -554,6 +974,7 @@
     }));
 
     var tooltip = makeTooltip(host);
+    var hbarShadow = softShadow(svg);
 
     /* --- Rows ------------------------------------------------------------ */
     data.forEach(function (d, i) {
@@ -580,10 +1001,12 @@
         }));
       } else {
         /* A row may carry an explicit ramp colour (ordered scales such as
-           age bands) instead of a categorical slot. */
+           age bands) instead of a categorical slot. Either way the fill is
+           a gradient of that one colour. */
         svg.appendChild(svgEl("path", {
-          class: "chart__bar" + (d.ramp ? "" : " s" + slot + "-fill"),
-          fill: d.ramp || null,
+          class: "chart__bar",
+          fill: paint(svg, colorFor(d, i, opts, slot), "h"),
+          filter: hbarShadow,
           d: hBarPath(padL, y, barW, barH),
           style: "animation-delay:" + (i * 30) + "ms"
         }));
@@ -625,10 +1048,10 @@
             {
               label: valueLabel,
               value: Orbit.num(d.value),
-              color: d.ramp || "var(--series-" + slot + ")"
+              color: colorFor(d, i, opts, slot)
             },
             d.group ? { label: "Group", value: d.group } : null
-          ].filter(Boolean)
+          ].concat(d.extra || []).filter(Boolean)
         );
       }
 
@@ -668,6 +1091,233 @@
     return host;
   }
 
+  /* ======================================================================
+     Stacked horizontal bar — a breakdown within each category
+
+     Segments are separated by a 2px surface gap rather than a stroke. Only
+     the last segment in a bar gets the rounded data-end; the rest stay
+     square so the stack reads as one continuous bar.
+     ====================================================================== */
+
+  /**
+   * @param {Array<{label, total, segments:[{label,value,slot,group}]}>} rows
+   * @param {Object} opts { width, valueLabel, categoryLabel, groups, title }
+   */
+  function stackedBarChart(rows, opts) {
+    opts = opts || {};
+    var valueLabel = opts.valueLabel || "Count";
+    var categoryLabel = opts.categoryLabel || "Category";
+
+    var host = el("div", { class: "chart chart--hbar chart--animate" });
+
+    if (!rows || !rows.length) {
+      host.appendChild(emptyState("Nothing to show"));
+      return host;
+    }
+
+    var W = opts.width || 760;
+    var rowH = opts.rowH || 38;
+    var padL = opts.padL || Math.round(Math.min(120, Math.max(76, W * 0.22)));
+    var padR = 56;
+    var padT = 8;
+    var padB = 26;
+    var plotW = W - padL - padR;
+    var H = padT + rows.length * rowH + padB;
+
+    var maxTotal = Math.max.apply(null, rows.map(function (r) { return r.total; }));
+    var xMax = niceMax(maxTotal || 1);
+    var xTicks = ticks(xMax, 4);
+
+    var svg = svgEl("svg", {
+      class: "chart__svg",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMin meet",
+      role: "img",
+      "aria-label": (opts.title || valueLabel) + " — stacked bar chart, " +
+        rows.length + " categories. The same values are available in the " +
+        "table view."
+    });
+
+    xTicks.forEach(function (t) {
+      var x = padL + plotW * (t / xMax);
+      svg.appendChild(svgEl("line", {
+        class: "chart__grid-line",
+        x1: x.toFixed(1), x2: x.toFixed(1), y1: padT, y2: padT + rows.length * rowH
+      }));
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick", x: x.toFixed(1), y: padT + rows.length * rowH + 16,
+        "text-anchor": "middle", text: Orbit.compact(t)
+      }));
+    });
+
+    svg.appendChild(svgEl("line", {
+      class: "chart__axis-line",
+      x1: padL, x2: padL, y1: padT, y2: padT + rows.length * rowH
+    }));
+
+    var tooltip = makeTooltip(host);
+    var GAP = 2;
+    var stackShadow = softShadow(svg);
+
+    /* One gradient per distinct colour, reused across every bar, so the
+       same status keeps the same paint in every row — and the same colour
+       it has in the status donut. */
+    var segPaint = {};
+    function paintForSeg(seg) {
+      var color = typeof seg.cat === "number"
+        ? catColor(seg.cat) : slotColor(seg.slot || 1);
+      if (!segPaint[color]) segPaint[color] = paint(svg, color, "h");
+      return segPaint[color];
+    }
+    function colorOfSeg(seg) {
+      return typeof seg.cat === "number"
+        ? catColor(seg.cat) : slotColor(seg.slot || 1);
+    }
+
+    rows.forEach(function (row, ri) {
+      var barH = rowH - 14;
+      var y = padT + ri * rowH + (rowH - barH) / 2;
+
+      svg.appendChild(svgEl("text", {
+        class: "chart__tick", x: padL - 10, y: y + barH / 2 + 4,
+        "text-anchor": "end", text: row.label
+      }));
+
+      var cursor = padL;
+
+      row.segments.forEach(function (seg, si) {
+        var isLast = si === row.segments.length - 1;
+        var raw = plotW * (seg.value / xMax);
+        /* Take the gap out of the segment, but never let it vanish. */
+        var segW = Math.max(1.5, raw - (isLast ? 0 : GAP));
+
+        var path = isLast
+          ? hBarPath(cursor, y, segW, barH)
+          : "M" + cursor + "," + y + "h" + segW + "v" + barH + "h" + (-segW) + "Z";
+
+        var mark = svgEl("path", {
+          class: "chart__bar",
+          fill: paintForSeg(seg),
+          filter: stackShadow,
+          d: path,
+          style: "animation-delay:" + (ri * 40 + si * 12) + "ms"
+        });
+        svg.appendChild(mark);
+
+        /* Hit area covers the segment plus its gap, with a sane minimum so
+           a thin segment is still reachable. */
+        var hitW = Math.max(raw, 10);
+        var hit = svgEl("rect", {
+          class: "chart__bar-hit",
+          x: cursor, y: y, width: hitW, height: barH,
+          tabindex: "0", role: "button",
+          "aria-label": row.label + ", " + seg.label + ": " +
+            Orbit.num(seg.value) + " " + valueLabel
+        });
+
+        function enter() {
+          host.classList.add("has-hover");
+          mark.classList.add("is-hovered");
+          var rect = host.getBoundingClientRect();
+          var scale = (rect.width || W) / W;
+          tooltip.show((cursor + segW / 2) * scale, y * scale, row.label, [
+            { label: seg.label, value: Orbit.num(seg.value), color: colorOfSeg(seg) },
+            { label: seg.group, value: Orbit.pct((seg.value / row.total) * 100, 0) + " of " + row.label }
+          ]);
+        }
+
+        function leave() {
+          host.classList.remove("has-hover");
+          mark.classList.remove("is-hovered");
+          tooltip.hide();
+        }
+
+        hit.addEventListener("mouseenter", enter);
+        hit.addEventListener("mouseleave", leave);
+        hit.addEventListener("focus", enter);
+        hit.addEventListener("blur", leave);
+        svg.appendChild(hit);
+
+        cursor += raw;
+      });
+
+      /* Row total past the bar end */
+      svg.appendChild(svgEl("text", {
+        class: "chart__label",
+        x: padL + plotW * (row.total / xMax) + 8,
+        y: y + barH / 2 + 4,
+        "text-anchor": "start",
+        text: Orbit.num(row.total)
+      }));
+    });
+
+    host.appendChild(svg);
+
+    if (opts.groups && opts.groups.length) {
+      var legend = el("div", { class: "legend" });
+      opts.groups.forEach(function (g) {
+        legend.appendChild(el("span", { class: "legend__item" }, [
+          el("span", {
+            class: "legend__swatch",
+            style: "background:" + (typeof g.cat === "number" ? catColor(g.cat) : slotColor(g.slot))
+          }),
+          document.createTextNode(g.name),
+          el("span", { class: "legend__value", text: Orbit.num(g.value) })
+        ]));
+      });
+      host.appendChild(legend);
+    }
+
+    /* Table view carries the full cross-tab — every priority × status cell,
+       which the chart itself can only show via the tooltip. */
+    host.appendChild(stackedTableTwin(rows, opts.statuses || [], categoryLabel, valueLabel));
+
+    return host;
+  }
+
+  /** Full cross-tab table: one row per category, one column per segment. */
+  function stackedTableTwin(rows, statuses, categoryLabel, valueLabel) {
+    var cols = statuses.length
+      ? statuses.map(function (s) { return s.label; })
+      : rows.reduce(function (acc, r) {
+          r.segments.forEach(function (s) {
+            if (acc.indexOf(s.label) < 0) acc.push(s.label);
+          });
+          return acc;
+        }, []);
+
+    return el("div", { class: "chart-tableview" }, [
+      el("div", { class: "table-wrap" }, [
+        el("table", { class: "table" }, [
+          el("thead", {}, [
+            el("tr", {}, [el("th", { text: categoryLabel })].concat(
+              cols.map(function (c) { return el("th", { class: "table__num", text: c }); }),
+              [el("th", { class: "table__num", text: "Total" })]
+            ))
+          ]),
+          el("tbody", {}, rows.map(function (row) {
+            var byLabel = {};
+            row.segments.forEach(function (s) { byLabel[s.label] = s.value; });
+            return el("tr", {}, [
+              el("td", { "data-label": categoryLabel, class: "table__strong", text: row.label })
+            ].concat(
+              cols.map(function (c) {
+                return el("td", {
+                  class: "table__num", "data-label": c,
+                  text: byLabel[c] ? Orbit.num(byLabel[c]) : "—"
+                });
+              }),
+              [el("td", {
+                class: "table__num table__strong", "data-label": "Total",
+                text: Orbit.num(row.total)
+              })]
+            ));
+          }))
+        ])
+      ])
+    ]);
+  }
+
   /** Rounded right end, square at the zero baseline. */
   function hBarPath(x, y, w, h, r) {
     var radius = Math.min(r === undefined ? 4 : r, h / 2, w);
@@ -689,7 +1339,9 @@
 
     var body = el("tbody", {}, data.map(function (d) {
       return el("tr", {}, [
-        el("td", { "data-label": categoryLabel, text: d.label }),
+        /* Full name, not the shortened axis label — the table view is the
+           accessible equivalent and must not inherit a truncation. */
+        el("td", { "data-label": categoryLabel, text: d.full || d.label }),
         el("td", { class: "table__num", "data-label": valueLabel, text: Orbit.num(d.value) })
       ]);
     }));
@@ -886,6 +1538,8 @@
     barChart: barChart,
     hBarChart: hBarChart,
     donutChart: donutChart,
+    lineChart: lineChart,
+    stackedBarChart: stackedBarChart,
     tableTwin: tableTwin,
     viewToggle: viewToggle,
     responsive: responsive,

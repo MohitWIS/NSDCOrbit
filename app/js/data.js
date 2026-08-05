@@ -43,8 +43,50 @@
         dueDate: "Due_Date",
         dateOfOM: "Date_of_OM",
         memoType: "Memo_Type",
-        status: "Status"
+        status: "Status",
+        priority: "Priority",
+        ministry: "Ministry",
+        stage: "Stage",
+        department: "Originating_Department",
+        assignee: "Current_Assignee"
       },
+
+      assigneeFieldCandidates: [
+        "Current_Assignee", "Assignee", "Assigned_To", "Current_Owner",
+        "Owner", "Handled_By"
+      ],
+
+      departmentFieldCandidates: [
+        "Originating_Department", "Department", "Originating_Dept",
+        "Origin_Department", "Dept"
+      ],
+
+      /* Known departments, listed so a department with no OMs still shows a
+         zero bar — for a bottleneck view, an empty queue is information. */
+      departmentOrder: ["Secretarial", "Ministry", "Audit"],
+
+      /* Stage is a separate field from Status. Detected at runtime because
+         it is not in the confirmed field list. */
+      stageFieldCandidates: [
+        "Stage", "OM_Stage", "Workflow_Stage", "Current_Stage", "Stage_Name"
+      ],
+
+      /* A column chart stops being readable well before every ministry can
+         have its own bar, so the tail is folded into "Other" — and the fold
+         is reported on screen, never silent. The table view keeps all of
+         them. */
+      ministryTopN: 12,
+
+      /* Priority is not among the confirmed fields, so it is detected at
+         runtime and pinned here once known. */
+      priorityFieldCandidates: [
+        "Priority", "Priority_Level", "OM_Priority", "Urgency",
+        "Priority_Type", "Importance"
+      ],
+
+      /* Highest first — the order the bars are drawn in. Values found in
+         the data but not listed here are appended in the order seen. */
+      priorityOrder: ["Critical", "High", "Medium", "Low"],
 
       /* Statuses that count as still-live work. Compared after
          normalisation, so "In-Progress" and "IN PROGRESS" both match. */
@@ -54,6 +96,33 @@
          of these statuses. Only "Closed" per the stated rule — add
          "Approved" / "Rejected" here if those should also stop the clock. */
       overdueExcludeStatuses: ["Closed"],
+
+      /* Statuses that count as closed for the "Closed this month" KPI. */
+      closedStatuses: ["Closed"],
+
+      /* Outcomes where an OM went backwards rather than through. */
+      sendBackStatuses: ["Returned", "Rejected"],
+
+      /* Governance flag: work that came back after being resolved.
+         Read from STAGE, not Status — they are different fields, and the
+         stage value is "Reopen" (not "Reopened"). */
+      reopenedStages: ["Reopen"],
+
+      /* Kept for the status chart's lifecycle vocabulary, which still has a
+         "Reopened" status. The governance KPI no longer uses this. */
+      reopenedStatuses: ["Reopened"],
+
+      /* The date a record was CLOSED. None of the confirmed fields carries
+         this, so it is detected at runtime and pinned here once known.
+         Falling back to Due_Date would answer a different question — "closed
+         items that were DUE this month" rather than "closed this month" — so
+         the fallback is reported on screen rather than assumed. */
+      closedDateField: null,
+      closedDateFieldCandidates: [
+        "Closed_Date", "Date_Closed", "Closure_Date", "Closed_On",
+        "Completed_On", "Completion_Date", "Approved_Date",
+        "Modified_Time", "Modified_On", "Last_Modified_Time"
+      ],
 
       /* The full workflow vocabulary, in lifecycle order. Statuses are
          listed even when their count is zero — for a fixed vocabulary,
@@ -401,7 +470,11 @@
           value: counts[key] || 0,
           group: group.name,
           groupIndex: gi,
-          slot: group.slot
+          slot: group.slot,
+          /* Wheel index follows the configured lifecycle order, which is
+             fixed — so a status keeps its colour no matter what the data
+             does. */
+          cat: rows.length
         });
       });
     });
@@ -416,7 +489,8 @@
         value: counts[key],
         group: "Other",
         groupIndex: groups.length,
-        slot: 6
+        slot: 6,
+        cat: rows.length
       });
     });
 
@@ -447,6 +521,550 @@
   }
 
   Orbit.statusChartData = statusChartData;
+
+  /**
+   * Send-back / rejection analysis: the two outcomes where an OM went
+   * backwards instead of through.
+   *
+   * Rows are lifted straight out of statusChartData, so each keeps the
+   * SAME colour index it has in the status donut — a status that is grape
+   * in one chart must not be olive in another.
+   *
+   * @returns {{rows, total, grandTotal, share, missing}}
+   */
+  function sendBackAnalysis(statusChart, spec) {
+    spec = spec || reports.omRequests;
+
+    var wanted = {};
+    (spec.sendBackStatuses || []).forEach(function (label) {
+      wanted[normStatus(label)] = true;
+    });
+
+    var rows = ((statusChart && statusChart.rows) || [])
+      .filter(function (r) { return wanted[normStatus(r.label)]; })
+      .map(function (r) {
+        return { label: r.label, full: r.label, value: r.value, cat: r.cat };
+      })
+      .sort(function (a, b) { return b.value - a.value; });
+
+    var total = rows.reduce(function (sum, r) { return sum + r.value; }, 0);
+    var grandTotal = (statusChart && statusChart.total) || 0;
+
+    return {
+      rows: rows,
+      total: total,
+      grandTotal: grandTotal,
+      share: grandTotal ? (total / grandTotal) * 100 : 0,
+      missing: rows.length === 0
+    };
+  }
+
+  Orbit.sendBackAnalysis = sendBackAnalysis;
+
+  /**
+   * Count the records carrying any of `labels`, reading the breakdown that
+   * summariseByStatus already produced rather than walking the records
+   * again.
+   *
+   * Matching is normalised, so "Re-opened" and "REOPENED" are counted with
+   * "Reopened" — and `matched` reports which raw spellings were found, so a
+   * drifting status value is visible instead of quietly splitting the count.
+   *
+   * @returns {{count:number, matched:Object, denominator:number, rate:number}}
+   */
+  function countStatuses(statusSummary, labels) {
+    var wanted = {};
+    (labels || []).forEach(function (label) {
+      var key = normStatus(label);
+      wanted[key] = true;
+      wanted[key.replace(/ /g, "")] = true;
+    });
+
+    var breakdown = statusSummary.breakdown || {};
+    var count = 0;
+    var matched = {};
+
+    Object.keys(breakdown).forEach(function (raw) {
+      var key = normStatus(raw);
+      if (wanted[key] || wanted[key.replace(/ /g, "")]) {
+        count += breakdown[raw];
+        matched[raw] = breakdown[raw];
+      }
+    });
+
+    /* Records that actually carry a status — a blank cannot be "Reopened",
+       and including blanks would understate the rate. */
+    var denominator = Object.keys(breakdown).reduce(function (sum, raw) {
+      return sum + breakdown[raw];
+    }, 0);
+
+    return {
+      count: count,
+      matched: matched,
+      denominator: denominator,
+      rate: denominator ? (count / denominator) * 100 : 0
+    };
+  }
+
+  Orbit.countStatuses = countStatuses;
+
+  /**
+   * Resolve a field by testing candidates against real records. Returns the
+   * field name, or null so the caller can report the gap rather than
+   * charting a zero that looks like real data.
+   */
+  function resolveField(records, preferred, candidates, label) {
+    if (!records || !records.length) return null;
+
+    var sample = records.slice(0, 40);
+    var populated = function (name) {
+      var hits = 0;
+      for (var i = 0; i < sample.length; i++) {
+        var v = sample[i][name];
+        if (v !== null && v !== undefined && String(v).trim() !== "") hits++;
+      }
+      return hits;
+    };
+
+    if (preferred && populated(preferred) > 0) return preferred;
+
+    for (var c = 0; c < (candidates || []).length; c++) {
+      if (populated(candidates[c]) >= Math.ceil(sample.length * 0.5)) {
+        console.info("[Orbit] " + label + " field: \"" + candidates[c] + "\".");
+        return candidates[c];
+      }
+    }
+
+    console.warn("[Orbit] No " + label + " field found. Fields present: " +
+      Object.keys(records[0]).join(", "));
+    return null;
+  }
+
+  Orbit.resolveField = resolveField;
+
+  /**
+   * Count records whose `field` matches any of `labels`, comparing on the
+   * normalised value so "Reopen", "re-open" and "REOPEN" all count.
+   *
+   * The rate is measured against records that actually carry a value —
+   * a blank cannot be "Reopen", and counting blanks would understate it.
+   */
+  function countByField(records, field, labels) {
+    var wanted = {};
+    (labels || []).forEach(function (label) {
+      var key = normStatus(label);
+      wanted[key] = true;
+      wanted[key.replace(/ /g, "")] = true;
+    });
+
+    var result = {
+      count: 0, matched: {}, breakdown: {},
+      blank: 0, denominator: 0, rate: 0,
+      field: field, missing: !field
+    };
+
+    if (!field) return result;
+
+    records.forEach(function (rec) {
+      var raw = rec[field];
+      if (raw === null || raw === undefined || String(raw).trim() === "") {
+        result.blank++;
+        return;
+      }
+
+      var label = String(raw).trim();
+      result.breakdown[label] = (result.breakdown[label] || 0) + 1;
+      result.denominator++;
+
+      var key = normStatus(raw);
+      if (wanted[key] || wanted[key.replace(/ /g, "")]) {
+        result.count++;
+        result.matched[label] = (result.matched[label] || 0) + 1;
+      }
+    });
+
+    result.rate = result.denominator
+      ? (result.count / result.denominator) * 100 : 0;
+
+    return result;
+  }
+
+  Orbit.countByField = countByField;
+
+  /** Which lifecycle group a status belongs to, and its colour slot. */
+  function statusGroupIndex(spec) {
+    var map = {};
+    (spec.statusGroups || []).forEach(function (group, gi) {
+      group.statuses.forEach(function (label) {
+        map[normStatus(label)] = { name: group.name, slot: group.slot, order: gi };
+      });
+    });
+    return map;
+  }
+
+  /**
+   * Find the priority field by testing candidates against real records.
+   * Returns null when the report has no such field, so the caller can say
+   * so rather than render an empty chart.
+   */
+  function resolvePriorityField(records, spec) {
+    if (spec.fields.priority &&
+        records.length &&
+        records.some(function (r) { return r[spec.fields.priority]; })) {
+      return spec.fields.priority;
+    }
+
+    if (!records || !records.length) return null;
+    var sample = records.slice(0, 40);
+
+    for (var i = 0; i < spec.priorityFieldCandidates.length; i++) {
+      var name = spec.priorityFieldCandidates[i];
+      var hits = 0;
+      for (var j = 0; j < sample.length; j++) {
+        if (sample[j][name] && String(sample[j][name]).trim()) hits++;
+      }
+      if (hits >= Math.ceil(sample.length * 0.5)) {
+        spec.fields.priority = name;
+        console.info("[Orbit] priority field: \"" + name + "\" (" +
+          hits + "/" + sample.length + " sampled records populated).");
+        return name;
+      }
+    }
+
+    console.warn("[Orbit] No priority field found. Fields present: " +
+      Object.keys(records[0]).join(", "));
+    return null;
+  }
+
+  Orbit.resolvePriorityField = resolvePriorityField;
+
+  /**
+   * Cross-tabulate priority against status for the stacked bar chart.
+   *
+   * Segments are individual statuses, as asked. Colour, however, follows the
+   * lifecycle GROUP: ten stack segments per bar would need ten
+   * distinguishable hues, which no palette provides and which no reader can
+   * tell apart at segment size. Statuses are ordered so same-group ones sit
+   * together, giving four readable colour blocks subdivided by the surface
+   * gaps — with the exact status in the tooltip and the table view.
+   *
+   * @returns {{rows, statuses, groups, total, priorityField, missing}}
+   */
+  function priorityStatusMatrix(records, priorityField, statusField, spec) {
+    spec = spec || reports.omRequests;
+    var groupOf = statusGroupIndex(spec);
+
+    var result = {
+      rows: [], statuses: [], groups: [], total: 0,
+      priorityField: priorityField, missing: !priorityField, blankPriority: 0
+    };
+
+    if (!priorityField || !statusField) return result;
+
+    /* Collect the statuses actually present, ordered by lifecycle group so
+       same-coloured segments are adjacent. */
+    var statusSeen = {};
+    records.forEach(function (rec) {
+      var raw = rec[statusField];
+      if (raw === null || raw === undefined || String(raw).trim() === "") return;
+      var key = normStatus(raw);
+      if (!statusSeen[key]) statusSeen[key] = String(raw).trim();
+    });
+
+    var statuses = Object.keys(statusSeen).map(function (key) {
+      var g = groupOf[key] || { name: "Other", slot: 6, order: 99 };
+      return { key: key, label: statusSeen[key], group: g.name, slot: g.slot, order: g.order };
+    }).sort(function (a, b) {
+      return a.order - b.order || a.label.localeCompare(b.label);
+    });
+
+    /* Wheel index by position in the configured status order, so a status
+       shows the same colour here as in the status donut. */
+    var catOf = {};
+    (spec.statusGroups || []).forEach(function (group) {
+      group.statuses.forEach(function (label) {
+        var k = normStatus(label);
+        if (!(k in catOf)) catOf[k] = Object.keys(catOf).length;
+      });
+    });
+    statuses.forEach(function (s) {
+      if (!(s.key in catOf)) catOf[s.key] = Object.keys(catOf).length;
+      s.cat = catOf[s.key];
+    });
+
+    result.statuses = statuses;
+
+    /* Priorities, configured order first then anything else as encountered */
+    var priSeen = {};
+    var priOrder = [];
+    (spec.priorityOrder || []).forEach(function (p) {
+      priSeen[normStatus(p)] = { label: p, counts: {}, total: 0 };
+      priOrder.push(normStatus(p));
+    });
+
+    records.forEach(function (rec) {
+      var rawP = rec[priorityField];
+      var pLabel = (rawP === null || rawP === undefined || String(rawP).trim() === "")
+        ? "(not set)" : String(rawP).trim();
+      if (pLabel === "(not set)") result.blankPriority++;
+
+      var pKey = normStatus(pLabel);
+      if (!priSeen[pKey]) {
+        priSeen[pKey] = { label: pLabel, counts: {}, total: 0 };
+        priOrder.push(pKey);
+      }
+
+      var rawS = rec[statusField];
+      if (rawS === null || rawS === undefined || String(rawS).trim() === "") return;
+
+      var sKey = normStatus(rawS);
+      priSeen[pKey].counts[sKey] = (priSeen[pKey].counts[sKey] || 0) + 1;
+      priSeen[pKey].total++;
+      result.total++;
+    });
+
+    /* Drop configured priorities that never appear, so the chart does not
+       carry empty bars for values this report does not use. */
+    result.rows = priOrder.map(function (key) { return priSeen[key]; })
+      .filter(function (row) { return row.total > 0; })
+      .map(function (row) {
+        return {
+          label: row.label,
+          total: row.total,
+          segments: statuses.map(function (s) {
+            return {
+              label: s.label, group: s.group, slot: s.slot, cat: s.cat,
+              value: row.counts[s.key] || 0
+            };
+          }).filter(function (seg) { return seg.value > 0; })
+        };
+      });
+
+    /* Legend: the lifecycle groups actually represented. */
+    var groupTotals = {};
+    result.rows.forEach(function (row) {
+      row.segments.forEach(function (seg) {
+        groupTotals[seg.group] = groupTotals[seg.group] || { name: seg.group, slot: seg.slot, value: 0 };
+        groupTotals[seg.group].value += seg.value;
+      });
+    });
+
+    result.groups = (spec.statusGroups || []).map(function (g) {
+      return groupTotals[g.name];
+    }).filter(Boolean);
+
+    if (groupTotals["Other"]) result.groups.push(groupTotals["Other"]);
+
+    return result;
+  }
+
+  Orbit.priorityStatusMatrix = priorityStatusMatrix;
+  Orbit.statusGroupIndex = statusGroupIndex;
+
+  /**
+   * Shorten a ministry name for an axis label.
+   *
+   * "Ministry of Skill Development and Entrepreneurship" is unreadable
+   * under a column, and every name starting "Ministry of" means the prefix
+   * carries no information — it is the same on every bar. The full name
+   * stays on the record for the tooltip and the table.
+   */
+  function shortenMinistry(name, maxChars) {
+    var text = String(name || "").trim();
+    if (!text) return "(not set)";
+
+    text = text
+      .replace(/^ministry\s+of\s+/i, "")
+      .replace(/^ministry\s+/i, "")
+      .replace(/^department\s+of\s+/i, "")
+      .replace(/^dept\.?\s+of\s+/i, "")
+      .replace(/^government\s+of\s+/i, "");
+
+    var limit = maxChars || 16;
+    if (text.length <= limit) return text;
+
+    /* Cut on a word boundary where one is close enough to the limit. */
+    var cut = text.slice(0, limit);
+    var space = cut.lastIndexOf(" ");
+    if (space > limit * 0.6) cut = cut.slice(0, space);
+    return cut.replace(/[\s,;:-]+$/, "") + "…";
+  }
+
+  Orbit.shortenMinistry = shortenMinistry;
+
+  /**
+   * Volume of OMs per ministry, sorted descending.
+   *
+   * @returns {{rows, total, distinct, folded, foldedCount, ministryField}}
+   */
+  function ministryVolume(records, ministryField, spec) {
+    spec = spec || reports.omRequests;
+    var topN = spec.ministryTopN || 12;
+
+    var result = {
+      rows: [], all: [], total: 0, distinct: 0,
+      folded: 0, foldedCount: 0, blank: 0,
+      ministryField: ministryField, missing: !ministryField
+    };
+
+    if (!ministryField) return result;
+
+    var counts = {};
+    records.forEach(function (rec) {
+      var raw = rec[ministryField];
+      var label = (raw === null || raw === undefined || String(raw).trim() === "")
+        ? "(not set)" : String(raw).trim();
+      if (label === "(not set)") result.blank++;
+      counts[label] = (counts[label] || 0) + 1;
+      result.total++;
+    });
+
+    var all = Object.keys(counts).map(function (label) {
+      return {
+        label: shortenMinistry(label),
+        full: label,
+        value: counts[label]
+      };
+    }).sort(function (a, b) {
+      /* Descending by volume; ties resolved by name so the order is stable
+         between renders rather than depending on object key order. */
+      return b.value - a.value || a.full.localeCompare(b.full);
+    });
+
+    result.all = all;
+    result.distinct = all.length;
+
+    if (all.length <= topN) {
+      result.rows = all;
+      return result;
+    }
+
+    var head = all.slice(0, topN);
+    var tail = all.slice(topN);
+    var tailTotal = tail.reduce(function (sum, r) { return sum + r.value; }, 0);
+
+    result.rows = head.concat([{
+      label: "Other",
+      full: "Other (" + tail.length + " ministries)",
+      value: tailTotal,
+      isOther: true
+    }]);
+    result.folded = tail.length;
+    result.foldedCount = tailTotal;
+
+    console.info("[Orbit] Ministry chart shows the top " + topN + " of " +
+      all.length + "; " + tail.length + " folded into \"Other\" (" +
+      tailTotal + " OMs). The table view lists all of them.");
+
+    return result;
+  }
+
+  /**
+   * Fold a ranked list down to `topN` plus an "Other" residual.
+   *
+   * Separate from ministryVolume so the fold can be recomputed at render
+   * time: a chart in a half-width column fits far fewer columns than the
+   * same chart full width, and squeezing 13 rotated labels into 400px is
+   * how an axis becomes unreadable.
+   */
+  function foldTopN(all, topN) {
+    if (!all || all.length <= topN) return (all || []).slice();
+
+    var head = all.slice(0, topN);
+    var tail = all.slice(topN);
+    var tailTotal = tail.reduce(function (sum, r) { return sum + r.value; }, 0);
+
+    return head.concat([{
+      label: "Other",
+      full: "Other (" + tail.length + " ministries)",
+      value: tailTotal,
+      isOther: true,
+      foldedCount: tail.length
+    }]);
+  }
+
+  Orbit.foldTopN = foldTopN;
+  Orbit.ministryVolume = ministryVolume;
+
+  /**
+   * Workload per originating department — the bottleneck view.
+   *
+   * The bar is total OMs, but a bottleneck is really about what is still
+   * MOVING, so the live count travels with each row and surfaces in the
+   * tooltip and the subtitle. A department with a big total and nothing
+   * open is not a bottleneck; a small total that is entirely open is.
+   *
+   * @returns {{rows, total, totalOpen, departmentField, missing, blank}}
+   */
+  function departmentWorkload(records, deptField, statusField, spec) {
+    spec = spec || reports.omRequests;
+
+    var openWanted = {};
+    (spec.openStatuses || []).forEach(function (label) {
+      var key = normStatus(label);
+      openWanted[key] = true;
+      openWanted[key.replace(/ /g, "")] = true;
+    });
+
+    var result = {
+      rows: [], total: 0, totalOpen: 0, blank: 0,
+      departmentField: deptField, missing: !deptField
+    };
+
+    if (!deptField) return result;
+
+    var counts = {};
+    var seenRaw = {};
+
+    /* Seed the configured departments so a quiet one still gets a row. */
+    (spec.departmentOrder || []).forEach(function (label) {
+      var key = normStatus(label);
+      counts[key] = { total: 0, open: 0 };
+      seenRaw[key] = label;
+    });
+
+    records.forEach(function (rec) {
+      var raw = rec[deptField];
+      var label = (raw === null || raw === undefined || String(raw).trim() === "")
+        ? "(not set)" : String(raw).trim();
+      if (label === "(not set)") result.blank++;
+
+      var key = normStatus(label);
+      if (!counts[key]) { counts[key] = { total: 0, open: 0 }; seenRaw[key] = label; }
+
+      counts[key].total++;
+      result.total++;
+
+      var sKey = normStatus(statusField ? rec[statusField] : "");
+      if (openWanted[sKey] || openWanted[sKey.replace(/ /g, "")]) {
+        counts[key].open++;
+        result.totalOpen++;
+      }
+    });
+
+    result.rows = Object.keys(counts).map(function (key) {
+      return {
+        label: seenRaw[key],
+        full: seenRaw[key],
+        value: counts[key].total,
+        open: counts[key].open
+      };
+    }).sort(function (a, b) {
+      /* Busiest first; ties by name so the order is stable between renders. */
+      return b.value - a.value || a.label.localeCompare(b.label);
+    });
+
+    /* Colour by rank position — few enough departments that the wheel has
+       room, and the index is stable because the sort is. */
+    result.rows.forEach(function (row, i) {
+      row.cat = i;
+      row.extra = [{ label: "Still open", value: Orbit.num(row.open) }];
+    });
+
+    return result;
+  }
+
+  Orbit.departmentWorkload = departmentWorkload;
 
   /**
    * Count overdue OMs: due date in the past, status not one of the excluded
@@ -544,16 +1162,19 @@
       }
 
       /* Keep the record itself, not just the tally — the useful question is
-         "which ones", and a count alone cannot answer it. */
+         "which ones", and a count alone cannot answer it. These are the
+         columns the overdue grid renders. */
       result.items.push({
         number: rec[f.number] || rec.ID || "—",
-        reference: rec[f.reference] || "",
+        reference: rec[f.reference] || "—",
         subject: rec[f.subject] || "—",
+        ministry: rec[f.ministry] || "—",
+        assignee: rec[f.assignee] || "Unassigned",
         due: dueStart,
         daysLate: daysLate,
         status: label,
         band: band ? band.label : "",
-        ramp: band ? band.ramp : "var(--seq-400)"
+        ramp: band ? band.ramp : "var(--heat-2)"
       });
     });
 
@@ -568,6 +1189,135 @@
 
   Orbit.summariseOverdue = summariseOverdue;
 
+  /**
+   * Find the field carrying the closure date, testing candidates against
+   * records that are actually closed (a closure date is empty on everything
+   * else, so sampling the whole report would find nothing).
+   *
+   * Returns { field, fallback } — `fallback` true when no candidate matched
+   * and the caller should use the general date field instead, which answers
+   * a different question and must be said out loud.
+   */
+  function resolveClosedDateField(records, spec, statusField, closedStatuses) {
+    if (spec.closedDateField) return { field: spec.closedDateField, fallback: false };
+
+    var wanted = {};
+    (closedStatuses || ["Closed"]).forEach(function (label) {
+      var key = normStatus(label);
+      wanted[key] = true;
+      wanted[key.replace(/ /g, "")] = true;
+    });
+
+    var closed = [];
+    for (var i = 0; i < records.length && closed.length < 40; i++) {
+      var key = normStatus(statusField ? records[i][statusField] : "");
+      if (wanted[key] || wanted[key.replace(/ /g, "")]) closed.push(records[i]);
+    }
+
+    if (!closed.length) return { field: null, fallback: true };
+
+    for (var c = 0; c < spec.closedDateFieldCandidates.length; c++) {
+      var name = spec.closedDateFieldCandidates[c];
+      var hits = 0;
+      for (var j = 0; j < closed.length; j++) {
+        if (closed[j][name] && Orbit.parseDate(closed[j][name])) hits++;
+      }
+      /* Require most closed records to carry it — a field populated on one
+         record in forty is not the closure date. */
+      if (hits >= Math.ceil(closed.length * 0.5)) {
+        spec.closedDateField = name;
+        console.info("[Orbit] closure date field: \"" + name + "\" (" +
+          hits + "/" + closed.length + " closed records parsed).");
+        return { field: name, fallback: false };
+      }
+    }
+
+    console.warn("[Orbit] No closure-date field found. Fields on a closed " +
+      "record: " + Object.keys(closed[0]).join(", ") +
+      ". Falling back to the general date field — the KPI then counts " +
+      "closed OMs DUE this month, not closed this month.");
+
+    return { field: null, fallback: true };
+  }
+
+  Orbit.resolveClosedDateField = resolveClosedDateField;
+
+  /**
+   * "Closed this month", with a month-over-month comparison.
+   *
+   * The current month is always partial, so the comparison is against the
+   * SAME span of last month — day 1 to today's day-of-month. Comparing a
+   * part-month against a complete one manufactures a decline: on the 5th it
+   * would read as roughly -85% every single month, which is noise, not
+   * signal. Last month's full total is returned alongside for context.
+   */
+  function summariseClosed(records, dateField, statusField, closedStatuses, ref) {
+    var now = ref || new Date();
+    var thisMonthStart = Orbit.startOfMonth(now);
+    var lastMonthStart = Orbit.addMonths(thisMonthStart, -1);
+    var dayOfMonth = now.getDate();
+    var daysInThisMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+    var wanted = {};
+    (closedStatuses || ["Closed"]).forEach(function (label) {
+      var key = normStatus(label);
+      wanted[key] = true;
+      wanted[key.replace(/ /g, "")] = true;
+    });
+
+    /* 12 rolling months of closures, for the sparkline */
+    var series = [];
+    var index = {};
+    for (var i = 11; i >= 0; i--) {
+      var monthStart = Orbit.addMonths(thisMonthStart, -i);
+      var point = { date: monthStart, label: Orbit.fmtMonth(monthStart), value: 0 };
+      index[monthStart.getFullYear() + "-" + monthStart.getMonth()] = point;
+      series.push(point);
+    }
+
+    var result = {
+      thisMonth: 0,
+      lastMonthToDate: 0,
+      lastMonthTotal: 0,
+      totalClosed: 0,
+      undated: 0,
+      series: series,
+      dateField: dateField,
+      dayOfMonth: dayOfMonth,
+      isPartialMonth: dayOfMonth < daysInThisMonth
+    };
+
+    if (!dateField) return result;
+
+    records.forEach(function (rec) {
+      var key = normStatus(statusField ? rec[statusField] : "");
+      if (!wanted[key] && !wanted[key.replace(/ /g, "")]) return;
+
+      result.totalClosed++;
+
+      var d = Orbit.parseDate(rec[dateField]);
+      if (!d) { result.undated++; return; }
+
+      if (Orbit.sameMonth(d, thisMonthStart)) result.thisMonth++;
+
+      if (Orbit.sameMonth(d, lastMonthStart)) {
+        result.lastMonthTotal++;
+        if (d.getDate() <= dayOfMonth) result.lastMonthToDate++;
+      }
+
+      var point = index[d.getFullYear() + "-" + d.getMonth()];
+      if (point) point.value++;
+    });
+
+    /* The headline comparison is like-for-like. */
+    result.delta = Orbit.delta(result.thisMonth, result.lastMonthToDate);
+    result.lastMonthLabel = Orbit.fmtMonth(lastMonthStart);
+
+    return result;
+  }
+
+  Orbit.summariseClosed = summariseClosed;
+
   /* ======================================================================
      Mock data
      Shaped like a real OM_Request_Form_Report row so the render path is
@@ -579,6 +1329,33 @@
     return String(d.getDate()).padStart(2, "0") + "-" +
       Orbit.MONTHS_SHORT[d.getMonth()] + "-" + d.getFullYear();
   }
+
+  /* Weighted so the leaders repeat and the tail appears once or twice —
+     a flat list would make the chart a suspiciously even row of bars. */
+  var MINISTRIES = [
+    "Ministry of Skill Development and Entrepreneurship",
+    "Ministry of Skill Development and Entrepreneurship",
+    "Ministry of Skill Development and Entrepreneurship",
+    "Ministry of Education",
+    "Ministry of Education",
+    "Ministry of Rural Development",
+    "Ministry of Rural Development",
+    "Ministry of Labour and Employment",
+    "Ministry of Finance",
+    "Ministry of Electronics and Information Technology",
+    "Ministry of Housing and Urban Affairs",
+    "Ministry of Women and Child Development",
+    "Ministry of Micro, Small and Medium Enterprises",
+    "Ministry of Textiles",
+    "Ministry of Tourism",
+    "Ministry of Social Justice and Empowerment",
+    "Ministry of Tribal Affairs",
+    "Ministry of Health and Family Welfare",
+    "Ministry of Agriculture and Farmers Welfare",
+    "Ministry of Heavy Industries",
+    "Ministry of Ports, Shipping and Waterways",
+    "Ministry of Petroleum and Natural Gas"
+  ];
 
   function buildMockOMs() {
     var rows = [];
@@ -607,7 +1384,8 @@
          Deliberately mixes "In-Progress" and "In Progress" so the
          normalisation path is exercised in preview. */
       var pool = back <= 1
-        ? ["Open", "In Progress", "In-Progress", "Assigned", "Due", "Overdue", "Reopened"]
+        ? ["Open", "In Progress", "In-Progress", "Assigned", "Closed",
+           "Due", "Overdue", "Reopened", "Closed"]
         : back <= 3
           ? ["Open", "In Progress", "Assigned", "Approved", "Returned", "Overdue", "Closed"]
           : ["Closed", "Approved", "Closed", "Rejected", "Approved", "Returned", "Closed"];
@@ -628,8 +1406,39 @@
           Date_of_OM: fmtCreatorDate(raised),
           Due_Date: fmtCreatorDate(due),
           Memo_Type: memoTypes[(i + back) % memoTypes.length],
-          Status: pool[(i + back) % pool.length]
+          Status: pool[(i + back) % pool.length],
+          /* Skewed towards the middle, as real priority fields are — a flat
+             split would make the stacked chart look artificially tidy. */
+          Priority: ["Critical", "High", "High", "Medium", "Medium",
+                     "Medium", "Medium", "Low", "Low"][(i * 3 + back) % 9],
+          /* A few ministries dominate and a long tail follows, which is the
+             real shape — and it exercises the top-N fold in preview. */
+          Ministry: MINISTRIES[(i * 7 + back * 3) % MINISTRIES.length],
+          /* Stage is its own workflow field. "Reopen" is rare, as a
+             governance exception should be. */
+          Stage: ["Draft", "Under Review", "With Ministry", "Approval",
+                  "Reopen", "Dispatch", "Under Review", "Closure",
+                  "With Ministry", "Approval"][(i * 5 + back) % 10],
+          /* Uneven on purpose — a bottleneck view is pointless if every
+             department carries the same load. */
+          Originating_Department: ["Secretarial", "Secretarial", "Ministry",
+                                   "Secretarial", "Audit", "Ministry",
+                                   "Secretarial"][(i * 3 + back * 2) % 7],
+          /* One in eight left unassigned — an overdue OM with no owner is
+             exactly what the grid should make visible. */
+          Current_Assignee: ["A. Sharma", "R. Iyer", "M. Khan", "P. Nair",
+                             "S. Verma", "", "K. Reddy",
+                             "N. Gupta"][(i * 5 + back * 3) % 8]
         });
+
+        /* Closed records carry a closure date a little after the due date;
+           everything else leaves it blank, exactly as the real form would. */
+        var row = rows[rows.length - 1];
+        if (normStatus(row.Status) === "closed") {
+          var closedOn = new Date(due.getFullYear(), due.getMonth(),
+            due.getDate() + 2 + (i % 9));
+          if (closedOn <= now) row.Closed_Date = fmtCreatorDate(closedOn);
+        }
       }
     }
     return rows;
