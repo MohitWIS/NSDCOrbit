@@ -178,7 +178,24 @@
     Orbit.clear(slots.kpi);
     Orbit.clear(slots.trend);
 
-    /* ---- Tile 1: live workload ----------------------------------------- */
+    /* ---- Tile 1: total received ----------------------------------------
+       Every record in the report. */
+    slots.kpi.appendChild(el("div", {
+      class: "card kpi kpi--violet",
+      title: "Every record in OM_Request_Form_Report"
+    }, [
+      el("div", { class: "kpi__top" }, [
+        el("div", { class: "kpi__label" }, [
+          el("span", { class: "kpi__icon" }, [icon("inbox", 15)]),
+          document.createTextNode("Total OMs received")
+        ])
+      ]),
+      el("div", { class: "kpi__figure" }, [
+        el("span", { class: "kpi__value", text: Orbit.num(s.total) })
+      ])
+    ]));
+
+    /* ---- Tile 2: live workload ----------------------------------------- */
     var st = state.omStatus;
     if (st) {
       var parts = Object.keys(st.openBy).map(function (label) {
@@ -199,17 +216,19 @@
           el("span", { class: "kpi__value", text: Orbit.num(st.open) }),
           st.open > 0 && s.total > 0
             ? el("span", {
-                class: "kpi__chip",
-                text: Orbit.pct((st.open / s.total) * 100, 0)
-              })
+              class: "kpi__chip",
+              text: Orbit.pct((st.open / s.total) * 100, 0)
+            })
             : null
         ])
       ]));
     }
 
-    /* ---- Tile 2: overdue ------------------------------------------------
-       Due date in the past and not Closed. Zero is good news, so the tile
-       reads as reassurance rather than shouting red at an empty count. */
+    /* ---- Tile 3: overdue ------------------------------------------------
+       Status == "Overdue" — the workflow decides, not the widget. Days
+       overdue are still measured from Due_Date. Zero is good news, so the
+       tile reads as reassurance rather than shouting red at an empty
+       count. */
     var od = state.omOverdue;
     if (od) {
       var isClear = od.count === 0;
@@ -217,11 +236,20 @@
         .filter(function (b) { return b.value > 0; })
         .map(function (b) { return b.label + " " + Orbit.num(b.value); });
 
+      /* A record the workflow calls overdue whose due date has not passed
+         is a contradiction worth surfacing rather than smoothing over. */
+      if (od.notPastDue) {
+        ageParts.push(Orbit.num(od.notPastDue) + " not yet past their due date");
+      }
+      if (od.undated) {
+        ageParts.push(Orbit.num(od.undated) + " with no readable due date");
+      }
+
       slots.kpi.appendChild(el("div", {
         class: "card kpi " + (isClear ? "kpi--good" : "kpi--critical"),
-        title: isClear ? "Nothing past its due date"
-          : ageParts.join(" · ") + " · average " +
-            Orbit.num(od.averageDaysLate) + " days late"
+        title: isClear ? "No OM is at status Overdue"
+          : "Status = Overdue · " + ageParts.join(" · ") +
+          " · average " + Orbit.num(od.averageDaysLate) + " days late"
       }, [
         el("div", { class: "kpi__top" }, [
           el("div", { class: "kpi__label" }, [
@@ -234,14 +262,14 @@
           isClear
             ? null
             : el("span", {
-                class: "kpi__chip",
-                text: "oldest " + Orbit.num(od.oldestDays) + "d"
-              })
+              class: "kpi__chip",
+              text: "oldest " + Orbit.num(od.oldestDays) + "d"
+            })
         ])
       ]));
     }
 
-    /* ---- Tile 3: closed this month, month over month --------------------
+    /* ---- Tile 4: closed this month, month over month --------------------
        The comparison is against the same span of last month, not the whole
        of it — see summariseClosed. The tile says which span it used, so the
        percentage is never mistaken for a full-month figure. */
@@ -273,7 +301,7 @@
       ]));
     }
 
-    /* ---- Tile 4: reopened — governance flag -----------------------------
+    /* ---- Tile 5: reopened — governance flag -----------------------------
        Read from STAGE = "Reopen", not from Status. A raw count cannot say
        whether governance is slipping — 30 reopened out of 200 is a problem,
        out of 20,000 it is noise — so the rate is shown beside it, against
@@ -291,8 +319,8 @@
           : noneReopened
             ? "Nothing at the Reopen stage"
             : Orbit.num(ro.count) + " of " + Orbit.num(ro.denominator) +
-              " OMs at Stage \"Reopen\"" +
-              (spellings.length > 1 ? " · counted as: " + spellings.join(", ") : "")
+            " OMs at Stage \"Reopen\"" +
+            (spellings.length > 1 ? " · counted as: " + spellings.join(", ") : "")
       }, [
         el("div", { class: "kpi__top" }, [
           el("div", { class: "kpi__label" }, [
@@ -301,7 +329,7 @@
             ]),
             document.createTextNode("Reopened")
           ]),
-          el("span", { class: "badge badge--neutral", text: "Governance" })
+          el("span", { class: "badge badge--neutral", text: "" })
         ]),
         el("div", { class: "kpi__figure" }, [
           el("span", {
@@ -316,22 +344,6 @@
         ])
       ]));
     }
-
-    /* ---- Tile 5: all-time total in the report -------------------------- */
-    slots.kpi.appendChild(el("div", {
-      class: "card kpi kpi--violet",
-      title: "Everything in OM_Request_Form_Report"
-    }, [
-      el("div", { class: "kpi__top" }, [
-        el("div", { class: "kpi__label" }, [
-          el("span", { class: "kpi__icon" }, [icon("inbox", 15)]),
-          document.createTextNode("All records")
-        ])
-      ]),
-      el("div", { class: "kpi__figure" }, [
-        el("span", { class: "kpi__value", text: Orbit.num(s.total) })
-      ])
-    ]));
 
     /* ---- Charts, side by side ------------------------------------------
        Each redraws at its column's real pixel width, so type and marks stay
@@ -726,7 +738,7 @@
             el("div", { class: "card__title", text: "Nothing overdue" }),
             el("div", {
               class: "card__subtitle",
-              text: "No OM is past its due date and still open, as of " +
+              text: "No OM is at status Overdue, as of " +
                 Orbit.fmtDate(od.asOf) + "."
             })
           ])
@@ -745,7 +757,10 @@
             ? el("span", { class: "badge badge--warning", text: "Unassigned" })
             : document.createTextNode(item.assignee)
         ]),
-        el("td", { "data-label": "Due Date", class: "table__muted", text: Orbit.fmtDate(item.due) }),
+        el("td", {
+          "data-label": "Due Date", class: "table__muted",
+          text: item.due ? Orbit.fmtDate(item.due) : "—"
+        }),
         el("td", { "data-label": "Days Overdue", class: "table__num" }, [
           el("span", { class: "age-pill", title: item.band + " past due" }, [
             el("span", { class: "age-pill__dot", style: "background:" + item.ramp }),
@@ -769,8 +784,8 @@
             el("div", { class: "card__title", text: "Overdue OMs" }),
             el("div", {
               class: "card__subtitle",
-              text: Orbit.num(od.count) + " past their due date and not Closed · " +
-                "oldest " + Orbit.num(od.oldestDays) + " days · as of " +
+              text: Orbit.num(od.count) + " at status Overdue · oldest " +
+                Orbit.num(od.oldestDays) + " days · as of " +
                 Orbit.fmtDate(od.asOf) +
                 (unassigned ? " · " + Orbit.num(unassigned) + " unassigned" : "")
             })

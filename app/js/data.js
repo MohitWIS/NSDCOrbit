@@ -92,9 +92,16 @@
          normalisation, so "In-Progress" and "IN PROGRESS" both match. */
       openStatuses: ["Open", "In Progress", "Assigned"],
 
-      /* An OM is overdue when its due date has passed and it is not in one
-         of these statuses. Only "Closed" per the stated rule — add
-         "Approved" / "Rejected" here if those should also stop the clock. */
+      /* How "overdue" is decided.
+           "status"  — the record's Status says so. What the client asked
+                       for: the workflow owns the judgement, not the widget.
+           "dueDate" — computed: Due_Date has passed and the status is not
+                       one of overdueExcludeStatuses.
+         Days overdue is measured from Due_Date either way. */
+      overdueMode: "status",
+      overdueStatuses: ["Overdue"],
+
+      /* Only consulted in "dueDate" mode. */
       overdueExcludeStatuses: ["Closed"],
 
       /* Statuses that count as closed for the "Closed this month" KPI. */
@@ -1124,25 +1131,77 @@
     };
 
     var f = reports.omRequests.fields;
+    var spec = reports.omRequests;
+    var byStatus = spec.overdueMode === "status";
 
-    if (!dateField) return result;
+    /* Statuses that mean "overdue" when the workflow decides it. */
+    var overdueWanted = {};
+    (spec.overdueStatuses || ["Overdue"]).forEach(function (label) {
+      var k = normStatus(label);
+      overdueWanted[k] = true;
+      overdueWanted[k.replace(/ /g, "")] = true;
+    });
+
+    result.mode = byStatus ? "status" : "dueDate";
+    result.notPastDue = 0;
+
+    /* Status mode still needs the date field to age the records, but it is
+       not what selects them — so a missing date field no longer means a
+       count of zero. */
+    if (!byStatus && !dateField) return result;
 
     records.forEach(function (rec) {
       var status = statusField ? rec[statusField] : null;
       var key = normStatus(status);
 
-      if (excluded[key] || excluded[key.replace(/ /g, "")]) {
-        result.resolved++;
+      if (byStatus) {
+        /* The workflow decides. */
+        if (!overdueWanted[key] && !overdueWanted[key.replace(/ /g, "")]) return;
+      } else {
+        if (excluded[key] || excluded[key.replace(/ /g, "")]) {
+          result.resolved++;
+          return;
+        }
+      }
+
+      var due = dateField ? Orbit.parseDate(rec[dateField]) : null;
+
+      if (!due) {
+        /* In dueDate mode an unreadable date means we cannot judge it. In
+           status mode the record is overdue regardless — it just cannot be
+           aged, so it counts but carries no days. */
+        if (!byStatus) { result.undated++; return; }
+        result.undated++;
+        result.count++;
+        result.items.push({
+          number: rec[f.number] || rec.ID || "—",
+          reference: rec[f.reference] || "—",
+          subject: rec[f.subject] || "—",
+          ministry: rec[f.ministry] || "—",
+          assignee: rec[f.assignee] || "Unassigned",
+          due: null,
+          daysLate: 0,
+          status: String(status == null || String(status).trim() === ""
+            ? "(no status)" : String(status).trim()),
+          band: "No due date",
+          ramp: "var(--cat-other)"
+        });
         return;
       }
 
-      var due = Orbit.parseDate(rec[dateField]);
-      if (!due) { result.undated++; return; }
-
       var dueStart = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-      if (dueStart >= todayStart) return;
 
-      var daysLate = Math.round((todayStart - dueStart) / DAY);
+      if (dueStart >= todayStart) {
+        /* dueDate mode: not overdue, skip. status mode: the status says
+           overdue but the date has not passed — count it and report the
+           discrepancy rather than hiding it. */
+        if (!byStatus) return;
+        result.notPastDue++;
+      }
+
+      /* Never negative: in status mode a record can be flagged overdue with
+         a due date still ahead of it, and "-4 days overdue" is nonsense. */
+      var daysLate = Math.max(0, Math.round((todayStart - dueStart) / DAY));
 
       result.count++;
       result.totalDaysLate += daysLate;
@@ -1161,6 +1220,13 @@
         }
       }
 
+      /* A record can be flagged overdue and still have zero days on it —
+         the due date has not passed. It belongs in no ageing band, so give
+         it its own label rather than an empty one, and a neutral dot so it
+         does not read as the mildest heat step. */
+      var bandLabel = band ? band.label : "Not yet past due";
+      var bandRamp = band ? band.ramp : "var(--cat-other)";
+
       /* Keep the record itself, not just the tally — the useful question is
          "which ones", and a count alone cannot answer it. These are the
          columns the overdue grid renders. */
@@ -1173,16 +1239,24 @@
         due: dueStart,
         daysLate: daysLate,
         status: label,
-        band: band ? band.label : "",
-        ramp: band ? band.ramp : "var(--heat-2)"
+        band: bandLabel,
+        ramp: bandRamp
       });
     });
 
     /* Most overdue first — that is the order someone works through them. */
     result.items.sort(function (a, b) { return b.daysLate - a.daysLate; });
 
-    result.averageDaysLate = result.count
-      ? Math.round(result.totalDaysLate / result.count) : 0;
+    /* Average over the records that are ACTUALLY past due. Including the
+       zero-day ones (flagged overdue but not yet past their date) would
+       drag the figure down and misstate how late the real backlog is. */
+    /* Records that could actually be aged. The ageing buckets cover THIS
+     set, not result.count — a record flagged overdue with a future or
+     unreadable due date has no band to sit in. Anything charting the
+     buckets must total against this, or the figures will not reconcile. */
+    result.aged = Math.max(0, result.count - result.notPastDue - result.undated);
+    result.averageDaysLate = result.aged > 0
+      ? Math.round(result.totalDaysLate / result.aged) : 0;
 
     return result;
   }
