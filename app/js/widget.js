@@ -269,35 +269,32 @@
       ]));
     }
 
-    /* ---- Tile 4: closed this month, month over month --------------------
-       The comparison is against the same span of last month, not the whole
-       of it — see summariseClosed. The tile says which span it used, so the
-       percentage is never mistaken for a full-month figure. */
+    /* ---- Tile 4: closed ------------------------------------------------
+       Every record at Status = Closed, with no date filter. The
+       month-over-month comparison is gone with the monthly framing — a
+       running total has nothing to compare against. `state.omClosed` is
+       still computed, because the trend chart plots closures by month. */
     var cl = state.omClosed;
-    if (cl) {
+    var closedNow = st ? Orbit.countStatuses(st, Orbit.reports.omRequests.closedStatuses) : null;
+
+    if (closedNow) {
       slots.kpi.appendChild(el("div", {
         class: "card kpi kpi--teal",
-        title: "vs " + (cl.isPartialMonth ? "1–" + cl.dayOfMonth + " " : "") +
-          cl.lastMonthLabel + " · " + cl.lastMonthLabel + " total " +
-          Orbit.num(cl.lastMonthTotal)
+        title: Orbit.num(closedNow.count) + " of " +
+          Orbit.num(closedNow.denominator) + " OMs are at status Closed"
       }, [
         el("div", { class: "kpi__top" }, [
           el("div", { class: "kpi__label" }, [
             el("span", { class: "kpi__icon" }, [icon("check", 15)]),
-            document.createTextNode("Closed this month")
+            document.createTextNode("Closed")
           ])
         ]),
         el("div", { class: "kpi__figure" }, [
-          el("span", { class: "kpi__value", text: Orbit.num(cl.thisMonth) }),
-          /* The month-over-month comparison is the requirement, so it stays
-             — beside the figure rather than under it. The period it
-             compares against is in the tile's title. */
-          el("span", { class: "kpi__chip" }, [deltaChip(cl.delta, "")])
+          el("span", { class: "kpi__value", text: Orbit.num(closedNow.count) }),
+          closedNow.count > 0
+            ? el("span", { class: "kpi__chip", text: Orbit.pct(closedNow.rate, 0) })
+            : null
         ])
-        /* No sparkline: this was the only tile carrying one once the tile
-           beside it was removed, so it read as a stray mark rather than a
-           trend — and with every month at zero it collapsed to a flat line
-           along the bottom edge. */
       ]));
     }
 
@@ -625,102 +622,61 @@
 
 
     /* ---- Data-quality notices ------------------------------------------ */
+    /* Nothing is rendered on screen. The client does not want notices in
+       the widget, so every one of these goes to the browser console
+       instead — the information still exists for whoever maintains the
+       report, it just no longer sits in front of the reader. */
+    reportDataQuality(s, st, cl, od, statusData);
+  }
+
+  /* ======================================================================
+     Data quality — console only
+
+     These were on-screen banners. They are diagnostics for whoever
+     maintains the Creator report, not messages for the dashboard's
+     audience, so they belong in the console.
+     ====================================================================== */
+
+  function reportDataQuality(s, st, cl, od, statusData) {
+    var notes = [];
+
     if (!s.dateField) {
-      slots.trend.appendChild(el("div", {
-        class: "card card--pad", style: "margin-top:var(--space-4)"
-      }, [
-        charts.errorState(
-          "No date field recognised",
-          "Every record counted into “All records”, but none could be placed in a month. " +
-          "Open the browser console for the list of fields present, then set dateField in js/data.js."
-        )
-      ]));
-    }
-
-    /* Without a closure-date field the "Closed this month" figure silently
-       becomes "closed OMs that were DUE this month" — a different question
-       with a different answer. Never let that pass unannounced. */
-    if (cl && cl.usedFallbackField) {
-      slots.trend.appendChild(el("div", {
-        class: "mock-banner", style: "margin-top:var(--space-4)"
-      }, [
-        icon("alert", 14),
-        document.createTextNode(
-          "No closure-date field was found, so “Closed this month” counts " +
-          "closed OMs whose “" + (cl.dateField || "date") + "” falls in this " +
-          "month — not the month they were actually closed. Set " +
-          "closedDateField in js/data.js once the real field is known."
-        )
-      ]));
-    }
-
-    /* The Overdue KPI is computed from the due date, while the workflow also
-       has an "Overdue" status someone (or an automation) sets by hand. When
-       the two disagree the status field has drifted from reality — worth
-       naming, because the two numbers appear on the same screen and a
-       reader will otherwise assume one of them is broken. */
-    if (od && statusData) {
-      var labelled = statusData.rows.reduce(function (n, r) {
-        return r.label === "Overdue" ? r.value : n;
-      }, 0);
-
-      if (labelled !== od.count) {
-        slots.trend.appendChild(el("div", {
-          class: "mock-banner", style: "margin-top:var(--space-4)"
-        }, [
-          icon("alert", 14),
-          document.createTextNode(
-            Orbit.num(od.count) + " OMs are past their due date and not Closed, " +
-            "but " + Orbit.num(labelled) + " carry the “Overdue” status. " +
-            "The KPI uses the due date; the chart shows the status as recorded."
-          )
-        ]));
-      }
-    }
-
-    /* A status outside the configured vocabulary still gets charted, in the
-       "Other" group — but say so, because it means the workflow has moved
-       on and the lifecycle grouping no longer describes it. */
-    if (st && st.statusField) {
-      if (statusData && statusData.unlisted.length) {
-        slots.trend.appendChild(el("div", {
-          class: "mock-banner", style: "margin-top:var(--space-4)"
-        }, [
-          icon("alert", 14),
-          document.createTextNode(
-            "Status values not in the configured workflow: " +
-            statusData.unlisted.join(", ") +
-            ". They are charted under “Other” — add them to statusGroups in " +
-            "js/data.js to place them in a lifecycle stage."
-          )
-        ]));
-      }
-
-      if (st.blank > 0) {
-        slots.trend.appendChild(el("div", {
-          class: "mock-banner", style: "margin-top:var(--space-4)"
-        }, [
-          icon("alert", 14),
-          document.createTextNode(
-            Orbit.num(st.blank) + " records have no “" + st.statusField +
-            "” value and are excluded from the open count."
-          )
-        ]));
-      }
+      notes.push("No date field recognised — every record counted into the " +
+        "total, but none could be placed in a month. Set dateField in js/data.js.");
     }
 
     if (s.dateField && s.undated > 0) {
-      slots.trend.appendChild(el("div", {
-        class: "mock-banner", style: "margin-top:var(--space-4)"
-      }, [
-        icon("alert", 14),
-        document.createTextNode(
-          Orbit.num(s.undated) + " of " + Orbit.num(s.total) +
-          " records have no readable “" + s.dateField +
-          "” value and are excluded from the monthly figures."
-        )
-      ]));
+      notes.push(Orbit.num(s.undated) + " of " + Orbit.num(s.total) +
+        " records have no readable \"" + s.dateField +
+        "\" value and are excluded from the monthly figures.");
     }
+
+    if (cl && cl.usedFallbackField) {
+      notes.push("No closure-date field found, so closed-by-month counts use \"" +
+        (cl.dateField || "date") + "\" instead. Set closedDateField in js/data.js.");
+    }
+
+    if (st && st.statusField) {
+      if (statusData && statusData.unlisted.length) {
+        notes.push("Status values outside the configured workflow (charted " +
+          "under \"Other\"): " + statusData.unlisted.join(", "));
+      }
+      if (st.blank > 0) {
+        notes.push(Orbit.num(st.blank) + " records have no \"" +
+          st.statusField + "\" value.");
+      }
+    }
+
+    if (od && od.notPastDue) {
+      notes.push(Orbit.num(od.notPastDue) + " records are at status Overdue " +
+        "but their due date has not passed.");
+    }
+
+    if (!notes.length) return;
+
+    console.groupCollapsed("[Orbit] data quality — " + notes.length + " note(s)");
+    notes.forEach(function (n) { console.warn(n); });
+    console.groupEnd();
   }
 
   /* ======================================================================
@@ -812,24 +768,6 @@
         ])
       ])
     ]));
-  }
-
-  /** Delta cue: arrow glyph + value + period. Colour reinforces, never alone. */
-  function deltaChip(d, suffix) {
-    var glyph = d.dir === "up" ? "▲" : d.dir === "down" ? "▼" : "—";
-    var text = d.pct === null
-      ? (d.abs > 0 ? "New" : "No change")
-      : (d.pct > 0 ? "+" : "") + d.pct.toFixed(1) + "%";
-
-    return el("span", { class: "delta delta--" + d.dir }, [
-      el("span", { "aria-hidden": "true", text: glyph }),
-      document.createTextNode(text),
-      /* Skip the trailing period label when there is none — an empty span
-         still renders a stray space inside a chip. */
-      suffix
-        ? el("span", { class: "text-muted", style: "font-weight:400", text: " " + suffix })
-        : null
-    ]);
   }
 
   /* ======================================================================
